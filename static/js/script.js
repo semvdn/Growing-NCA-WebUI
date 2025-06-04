@@ -11,7 +11,6 @@ const clearTrainCanvasBtn = document.getElementById('clearTrainCanvasBtn');
 const confirmDrawingBtnTrain = document.getElementById('confirmDrawingBtnTrain');
 let trainerCtx = null; 
 let isDrawingOnTrainerCanvas = false;
-// let trainCanvasSnapshotForUndo = null; // Basic undo: one step (Undo/Redo deferred for now)
 
 // --- Runner Canvas & Interaction ---
 const previewCanvasRunImgEl = document.getElementById('previewCanvasRun');
@@ -37,7 +36,7 @@ const trainModelParamsText = document.getElementById('trainModelParamsText');
 // --- DOM Elements (Runner) ---
 const modelFileInputRun = document.getElementById('modelFileInputRun');
 const loadModelBtnRun = document.getElementById('loadModelBtnRun');
-const loadCurrentTrainingModelBtnRun = document.getElementById('loadCurrentTrainingModelBtnRun');
+const loadCurrentTrainingModelBtnRun = document.getElementById('loadCurrentTrainingModelBtnRun'); 
 const startRunningLoopBtn = document.getElementById('startRunningLoopBtn');
 const stopRunningLoopBtn = document.getElementById('stopRunningLoopBtn');
 const resetRunnerStateBtn = document.getElementById('resetRunnerStateBtn');
@@ -96,7 +95,6 @@ async function postFormRequest(url = '', formData = new FormData()) {
 
 // --- UI Update Functions ---
 function updateTrainerControlsAvailability() {
-    // Trainer target definition
     confirmDrawingBtnTrain.disabled = trainingLoopActive; 
     loadImageFileBtnTrain.disabled = trainingLoopActive;
     clearTrainCanvasBtn.disabled = trainingLoopActive;
@@ -148,9 +146,9 @@ function openTab(evt, tabId) {
 
     if (tabId === 'TrainTab') {
         if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); runningStatusIntervalId = null;
-        // Start trainer polling if conditions are met (or just fetch once)
         if ((trainerInitialized || trainingLoopActive) && !trainingStatusIntervalId) {
-             trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200); 
+             // Check if already polling. Start only if needed.
+             if (!trainingStatusIntervalId) trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200); 
         }
         fetchTrainerStatus(); 
         updateTrainerControlsAvailability();
@@ -158,7 +156,8 @@ function openTab(evt, tabId) {
         if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
         if (runnerModelLoaded && !runningStatusIntervalId) { 
             const fps = parseInt(runFpsSlider.value);
-            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / fps)); 
+            // Check if already polling. Start only if needed.
+            if (!runningStatusIntervalId) runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / fps)); 
         }
         fetchRunnerStatus(); 
         updateRunnerControlsAvailability();
@@ -171,14 +170,15 @@ function initializeTrainerDrawCanvas() {
     trainerDrawCanvasEl.width = DRAW_CANVAS_WIDTH;
     trainerDrawCanvasEl.height = DRAW_CANVAS_HEIGHT;
     trainerCtx = trainerDrawCanvasEl.getContext('2d');
-    trainerCtx.fillStyle = 'white'; // Default background for drawing canvas
+    trainerCtx.fillStyle = 'white'; 
     trainerCtx.fillRect(0, 0, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT);
     trainerDrawCanvasEl.classList.add('active-draw'); 
     trainerProgressImgEl.style.display = 'none'; 
     trainerDrawCanvasEl.style.display = 'inline-block';
-    trainerTargetConfirmed = false; // Reset confirmation
-    initTrainerBtn.disabled = true; // Disable until target is confirmed
+    trainerTargetConfirmed = false; 
+    initTrainerBtn.disabled = true; 
     updateTrainerControlsAvailability();
+     trainingStatusDiv.textContent = "Status: Draw a pattern on the canvas or load an image file.";
 }
 
 function clearTrainerDrawCanvas() {
@@ -189,14 +189,12 @@ function clearTrainerDrawCanvas() {
         initTrainerBtn.disabled = true; 
         updateTrainerControlsAvailability();
         trainingStatusDiv.textContent = "Status: Drawing cleared. Draw a pattern or load a file.";
-        // trainerProgressImgEl.style.display = 'none'; // Ensure image is hidden
-        // trainerDrawCanvasEl.style.display = 'inline-block'; // Ensure canvas is shown
     }
 }
 
 function drawOnTrainerCanvas(event, isDragging) {
     if (!isDrawingOnTrainerCanvas && !isDragging) return; 
-    if (!trainerCtx || trainingLoopActive) return; // Don't draw if training active
+    if (!trainerCtx || trainingLoopActive) return; 
 
     const rect = trainerDrawCanvasEl.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -204,12 +202,10 @@ function drawOnTrainerCanvas(event, isDragging) {
 
     trainerCtx.fillStyle = trainDrawColorPicker.value;
     trainerCtx.beginPath();
-    // Simple circle brush, size 5 for now, can be made configurable
-    const brushSize = 5; 
+    const brushSize = 5; // Can be made configurable
     trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2); 
     trainerCtx.fill();
 
-    // Drawing has changed, target needs reconfirmation
     if (trainerTargetConfirmed) { 
         trainingStatusDiv.textContent = "Status: Drawing modified. Confirm again to use as target.";
     }
@@ -244,7 +240,7 @@ clearTrainCanvasBtn.addEventListener('click', () => {
         showGlobalStatus("Cannot clear drawing while training is active.", false);
         return;
     }
-    initializeTrainerDrawCanvas(); // This also clears and resets states
+    initializeTrainerDrawCanvas(); 
 });
 
 confirmDrawingBtnTrain.addEventListener('click', async () => {
@@ -254,8 +250,8 @@ confirmDrawingBtnTrain.addEventListener('click', async () => {
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         trainerTargetConfirmed = true;
-        trainerDrawCanvasEl.style.display = 'none'; // Hide drawing
-        trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; // Show processed target
+        trainerDrawCanvasEl.style.display = 'none'; 
+        trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; 
         trainerProgressImgEl.style.display = 'inline-block';
         trainingStatusDiv.textContent = "Status: Drawn pattern confirmed. Initialize Trainer.";
     }
@@ -327,9 +323,10 @@ initTrainerBtn.addEventListener('click', async () => {
         trainingStatusDiv.textContent = "Status: Trainer Initialized.";
     } else {
         trainerInitialized = false;
-        // If init fails, revert to showing drawing canvas IF no file was the source
-        // This state handling can be complex. For now, rely on user to re-init target.
-        // initializeTrainerDrawCanvas(); // Or show error and let user decide
+        // Revert to drawing if init failed and drawn pattern was the source
+        // initializeTrainerDrawCanvas(); // This might be too aggressive, user might want to see the failed target
+        trainingStatusDiv.textContent = "Status: Trainer initialization failed. Check target or settings.";
+
     }
     updateTrainerControlsAvailability();
 });
@@ -340,8 +337,8 @@ startTrainingBtn.addEventListener('click', async () => {
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         trainingLoopActive = true;
-        trainerDrawCanvasEl.style.display = 'none'; // Ensure drawing canvas is hidden
-        trainerProgressImgEl.style.display = 'inline-block'; // Ensure progress img is visible
+        trainerDrawCanvasEl.style.display = 'none'; 
+        trainerProgressImgEl.style.display = 'inline-block'; 
         if (!trainingStatusIntervalId && currentOpenTab === 'TrainTab') { 
             trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200); 
         }
@@ -359,7 +356,7 @@ stopTrainingBtn.addEventListener('click', async () => {
     const response = await postRequest('/stop_training'); 
     showGlobalStatus(response.message, response.success);
     trainingLoopActive = false; 
-    fetchTrainerStatus(); // Update status immediately
+    fetchTrainerStatus(); 
     updateTrainerControlsAvailability();
 });
 
@@ -371,63 +368,54 @@ saveTrainerModelBtn.addEventListener('click', async () => {
 
 async function fetchTrainerStatus() {
     if (currentOpenTab !== 'TrainTab' && trainingStatusIntervalId) { return; }
-    if (!trainerInitialized && !trainerTargetConfirmed && trainingStatusIntervalId) { 
-        // If completely reset (no target, not init), stop polling and show drawing canvas
-        clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
-        initializeTrainerDrawCanvas(); // Show drawing canvas
-        trainingStatusDiv.textContent = "Status: Define a target pattern.";
-        updateTrainerControlsAvailability(); return;
+    
+    if (!trainerInitialized && !trainerTargetConfirmed ) { 
+        if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); 
+        trainingStatusIntervalId = null;
+        // initializeTrainerDrawCanvas(); // Ensure drawing canvas is shown if completely reset
+        // trainingStatusDiv.textContent = "Status: Define a target pattern.";
+        // updateTrainerControlsAvailability(); 
+        return; // Don't poll if nothing is set up
     }
-     if (!trainerInitialized && trainerTargetConfirmed && trainingStatusIntervalId) {
-        // Target confirmed, but not initialized yet, show target preview, don't poll training status
-        // This case is handled by confirm/load file which shows target preview.
-        // Polling for trainer steps should only start after init.
-        // No, actually, even if not initialized, we might want to poll if target is set
-        // to keep the "target preview" fresh if that endpoint changes.
-        // For now, let's simplify: only poll training steps if trainer IS initialized.
-        // Or, have a different endpoint for just "get_trainer_target_preview" if needed separately.
-        // Let's assume get_training_status also returns preview_url for initial state if just initialized.
-    }
-
 
     try {
         const response = await fetch('/get_training_status');
         if (!response.ok) { 
             trainingStatusDiv.textContent = `Trainer status error: ${response.status}`;
-            // trainingLoopActive = false; // Don't assume, could be transient network error
             updateTrainerControlsAvailability(); return; 
         }
         const data = await response.json();
+        // Include elapsed time in the status message
         trainingStatusDiv.textContent = data.status_message || `Step: ${data.step || 0}, Loss: ${data.loss || 'N/A'}, Time: ${data.training_time || 'N/A'}`;
         
-        if (data.is_training || trainerInitialized) { 
+        if (data.is_training || (trainerInitialized && trainerTargetConfirmed)) { 
             trainerDrawCanvasEl.style.display = 'none';
             trainerProgressImgEl.style.display = 'inline-block';
             if (data.preview_url) trainerProgressImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
-        } else if (trainerTargetConfirmed) { // Target is set, but not initialized or training
-            trainerDrawCanvasEl.style.display = 'none'; // Should show static target preview
+        } else if (trainerTargetConfirmed && !trainerInitialized) { // Target confirmed, but not initialized yet
+            trainerDrawCanvasEl.style.display = 'none'; 
             trainerProgressImgEl.style.display = 'inline-block';
-            // Ensure trainerProgressImg shows the confirmed target
-             trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`;
-        }
-         else { // No target confirmed, not initialized
-            initializeTrainerDrawCanvas(); // Default to drawing mode
+            trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; // Show confirmed target
+        } else { // No target confirmed, not initialized
+            initializeTrainerDrawCanvas(); 
         }
 
+        const prevTrainingLoopActive = trainingLoopActive;
         trainingLoopActive = data.is_training; 
         updateTrainerControlsAvailability();
 
-        // If training just finished or stopped, and interval is still active, clear it.
-        if (!trainingLoopActive && trainerInitialized && trainingStatusIntervalId && data.step > 0) {
-            // clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
-            // Or slow it down considerably if we want to keep last state visible via polling
+        // If training just stopped, ensure interval is cleared or slowed
+        if (prevTrainingLoopActive && !trainingLoopActive && trainingStatusIntervalId) {
+            // clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null; 
+            // Or keep polling slowly
+        } else if (trainingLoopActive && !trainingStatusIntervalId && currentOpenTab === 'TrainTab'){
+            // Restart polling if it somehow stopped but should be active
+             trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
         }
 
 
     } catch (error) { 
         trainingStatusDiv.textContent = `Trainer status fetch error: ${error}.`;
-        // trainingLoopActive = false; // Don't assume on fetch error
-        // if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
         updateTrainerControlsAvailability();
     }
 }
@@ -439,7 +427,13 @@ runFpsSlider.addEventListener('input', async () => {
     runFpsValue.textContent = fps;
     if (runnerModelLoaded) { 
         await postRequest('/set_runner_speed', { fps: fps });
-        // Polling interval will be adjusted by fetchRunnerStatus based on server's current_fps
+        if (runnerLoopActive && runningStatusIntervalId) { 
+            clearInterval(runningStatusIntervalId);
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(33, 1000 / fps)); // Min 33ms interval
+        } else if (!runnerLoopActive && runningStatusIntervalId) { // If paused, also adjust potential slower poll
+            clearInterval(runningStatusIntervalId);
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, 1000); // Slower poll for paused
+        }
     }
 });
 runToolModeEraseRadio.addEventListener('change', () => { if (runToolModeEraseRadio.checked) currentRunToolMode = 'erase'; updateRunnerControlsAvailability(); });
@@ -449,9 +443,7 @@ loadCurrentTrainingModelBtnRun.addEventListener('click', async () => {
     if (!trainerInitialized) {
         showGlobalStatus("Trainer model not available (trainer not initialized).", false); return;
     }
-    if (trainingLoopActive) {
-         showGlobalStatus("Wait for training to stop or pause before loading its model.", false); return;
-    }
+    // No need to check trainingLoopActive on client, backend can handle copying weights from non-stepping trainer.
     const response = await postRequest('/load_current_training_model_for_runner');
     showGlobalStatus(response.message, response.success);
     if (response.success) {
@@ -466,13 +458,11 @@ loadCurrentTrainingModelBtnRun.addEventListener('click', async () => {
         }
         runStatusDiv.textContent = "Status: Runner: Loaded current training model. FPS: " + initialFps;
         runFpsSlider.dispatchEvent(new Event('input')); 
-    } else {
-        // runnerModelLoaded remains as is
     }
     updateRunnerControlsAvailability();
 });
 
-loadModelBtnRun.addEventListener('click', async () => { /* ... (Same as previous good version) ... */
+loadModelBtnRun.addEventListener('click', async () => {
     const formData = new FormData();
     if (modelFileInputRun.files.length > 0) formData.append('model_file', modelFileInputRun.files[0]);
     const response = await postFormRequest('/load_model_for_runner', formData);
@@ -494,29 +484,30 @@ loadModelBtnRun.addEventListener('click', async () => { /* ... (Same as previous
     }
     updateRunnerControlsAvailability();
 });
-startRunningLoopBtn.addEventListener('click', async () => { /* ... (Same as previous good version) ... */
+startRunningLoopBtn.addEventListener('click', async () => {
     if (!runnerModelLoaded) return;
     const response = await postRequest('/start_running');
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         runnerLoopActive = true;
         if (!runningStatusIntervalId && currentOpenTab === 'RunTab') { 
-            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / parseInt(runFpsSlider.value))); 
+             const fps = parseInt(runFpsSlider.value);
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(33, 1000 / fps)); 
         }
     }
     updateRunnerControlsAvailability();
 });
-stopRunningLoopBtn.addEventListener('click', async () => { /* ... (Same as previous good version) ... */
+stopRunningLoopBtn.addEventListener('click', async () => {
     if(!runnerModelLoaded) {
         showGlobalStatus("Runner: No model loaded to stop.", false); return;
     }
     const response = await postRequest('/stop_running');
     showGlobalStatus(response.message, response.success);
-    // runnerLoopActive will be updated by fetchRunnerStatus after server confirms
+    // Server confirms loop stop. fetchRunnerStatus will update runnerLoopActive.
     fetchRunnerStatus(); 
     updateRunnerControlsAvailability();
 });
-resetRunnerStateBtn.addEventListener('click', async () => { /* ... (Same as previous good version) ... */
+resetRunnerStateBtn.addEventListener('click', async () => {
     if (!runnerModelLoaded) return;
     await handleRunnerAction('reset_runner'); 
     runnerLoopActive = false; 
@@ -524,7 +515,7 @@ resetRunnerStateBtn.addEventListener('click', async () => { /* ... (Same as prev
 });
 rewindBtnRun.addEventListener('click', async () => handleRunnerAction('rewind'));
 skipForwardBtnRun.addEventListener('click', async () => handleRunnerAction('skip_forward'));
-async function handleRunnerAction(action, params = {}) { /* ... (Same as previous good version, ensure correct IDs for color picker etc.) ... */
+async function handleRunnerAction(action, params = {}) {
     if (!runnerModelLoaded) return;
     const payload = { action, ...params };
     const response = await postRequest('/runner_action', payload);
@@ -534,10 +525,10 @@ async function handleRunnerAction(action, params = {}) { /* ... (Same as previou
         runStatusDiv.textContent = `${response.message} (Target: ${currentFPS} FPS)`;
          if (action !== 'modify_area') { /* showGlobalStatus for non-drag actions */ }
     } else if (!response.success) { showGlobalStatus(response.message, false); }
-    if (action === 'reset_runner') { runnerLoopActive = false; } // Reset implies loop stops
+    if (action === 'reset_runner') { runnerLoopActive = false; } 
     updateRunnerControlsAvailability(); 
 }
-function performCanvasAction(event, isDrag = false) { /* ... (Same as previous good version, ensure correct IDs) ... */
+function performCanvasAction(event, isDrag = false) {
     if (!runnerModelLoaded || currentOpenTab !== 'RunTab' ) return; 
     const rect = previewCanvasRunImgEl.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return; 
@@ -550,17 +541,12 @@ function performCanvasAction(event, isDrag = false) { /* ... (Same as previous g
     const brushSliderVal = parseInt(runBrushSizeSlider.value); 
     const normBrushFactor = (brushSliderVal / 30) * 0.20 + 0.01; 
     handleRunnerAction('modify_area', { 
-        tool_mode: currentRunToolMode, // Use currentRunToolMode
-        draw_color_hex: runDrawColorPicker.value, // Use runDrawColorPicker
+        tool_mode: currentRunToolMode, 
+        draw_color_hex: runDrawColorPicker.value, 
         norm_x: normX, norm_y: normY, brush_size_norm: normBrushFactor,
         canvas_render_width: rect.width, canvas_render_height: rect.height
     });
 }
-previewCanvasRunImgEl.addEventListener('mousedown', (event) => { /* ... */ });
-previewCanvasRunImgEl.addEventListener('mousemove', (event) => { /* ... */ });
-document.addEventListener('mouseup', (event) => { /* ... */ });
-previewCanvasRunImgEl.addEventListener('mouseleave', () => { /* ... */ });
-// (Paste full mousedown, mousemove, mouseup, mouseleave for runner from previous good version)
 previewCanvasRunImgEl.addEventListener('mousedown', (event) => {
     if (event.button !== 0) return; 
     if (!runnerModelLoaded || currentOpenTab !== 'RunTab') return;
@@ -585,7 +571,7 @@ previewCanvasRunImgEl.addEventListener('mouseleave', () => {
     }
 });
 
-async function fetchRunnerStatus() { /* ... (Same as previous good version) ... */
+async function fetchRunnerStatus() {
     if (currentOpenTab !== 'RunTab' && runningStatusIntervalId) { return; }
     if (!runnerModelLoaded && runningStatusIntervalId) { 
         clearInterval(runningStatusIntervalId); runningStatusIntervalId = null;
@@ -606,15 +592,17 @@ async function fetchRunnerStatus() { /* ... (Same as previous good version) ... 
             if (data.preview_url) previewCanvasRunImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
         }
         runnerLoopActive = data.is_loop_active; 
-        if (runningStatusIntervalId) {
+        
+        if (runningStatusIntervalId) { // Only adjust if an interval is already supposed to be running
             clearInterval(runningStatusIntervalId); 
             let newIntervalTime = 1000; 
             if (runnerLoopActive) {
-                const targetFpsNum = parseFloat(data.current_fps);
+                const targetFpsNum = parseFloat(data.current_fps); // Use current_fps from status data
                 newIntervalTime = (targetFpsNum && targetFpsNum > 0) ? Math.max(33, 1000 / targetFpsNum) : 50;
-            }
+            } // else if paused/stopped, it remains 1000ms
             runningStatusIntervalId = setInterval(fetchRunnerStatus, newIntervalTime);
-        } else if (runnerModelLoaded && currentOpenTab === 'RunTab') { 
+        } else if (runnerModelLoaded && currentOpenTab === 'RunTab' && !runningStatusIntervalId) { 
+             // If polling stopped but should be active (e.g. after tab switch)
              const targetFpsNum = parseFloat(data.current_fps);
              const intervalTime = (runnerLoopActive && targetFpsNum && targetFpsNum > 0) ? Math.max(33, 1000/targetFpsNum) : 1000;
              runningStatusIntervalId = setInterval(fetchRunnerStatus, intervalTime);
@@ -628,11 +616,10 @@ async function fetchRunnerStatus() { /* ... (Same as previous good version) ... 
     }
 }
 
-
 // --- Initial Setup ---
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('trainTabButton').click(); 
-    initializeTrainerDrawCanvas(); 
+    initializeTrainerDrawCanvas(); // Set up trainer drawing canvas first
+    document.getElementById('trainTabButton').click(); // Activate TrainTab which will also call updateTrainerControlsAvailability
 
     experimentTypeSelectTrain.addEventListener('change', () => {
         const isRegen = experimentTypeSelectTrain.value === 'Regenerating';
@@ -645,19 +632,16 @@ document.addEventListener('DOMContentLoaded', () => {
     runFpsValue.textContent = runFpsSlider.value;       
     currentRunToolMode = runToolModeEraseRadio.checked ? 'erase' : 'draw'; 
 
-
     const placeholderDim = DRAW_CANVAS_WIDTH; 
     const placeholderColor = '#f0f0f0';
     const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`;
     
-    // trainerDrawCanvas is initialized directly. trainerProgressImg is initially hidden.
     trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress'); 
     previewCanvasRunImgEl.src = svgPlaceholder('Runner Preview');
 
-    updateTrainerControlsAvailability();
-    updateRunnerControlsAvailability();
-
-    // Initial status fetch for the default active tab
-    if (currentOpenTab === 'TrainTab') fetchTrainerStatus();
-    else if (currentOpenTab === 'RunTab') fetchRunnerStatus();
+    // Initial calls after DOM is ready and tab is set
+    // updateTrainerControlsAvailability(); // Called by openTab
+    // updateRunnerControlsAvailability();   // Called by openTab
+    // if (currentOpenTab === 'TrainTab') fetchTrainerStatus(); // Called by openTab
+    // else if (currentOpenTab === 'RunTab') fetchRunnerStatus(); // Called by openTab
 });
