@@ -6,35 +6,58 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neural CA Web UI</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; }
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
         .container { display: flex; flex-wrap: wrap; gap: 20px; }
-        .controls { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); width: 450px; min-width: 300px; }
-        .display { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); flex-grow: 1; text-align: center; min-width: 300px;}
-        .tabs button { padding: 10px; margin-right: 5px; cursor: pointer; border: none; background-color: #eee; border-bottom: 3px solid transparent; }
-        .tabs button.active { background-color: #fff; border-bottom: 3px solid #007bff; font-weight: bold;}
-        .tab-content { display: none; padding-top:10px; }
+        .controls { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); width: 450px; min-width: 320px; }
+        .display { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); flex-grow: 1; text-align: center; min-width: 300px;}
+        
+        .tabs button { padding: 10px 15px; margin-right: 5px; cursor: pointer; border: none; background-color: #e9ecef; border-bottom: 3px solid transparent; border-radius: 4px 4px 0 0; }
+        .tabs button.active { background-color: #fff; border-bottom: 3px solid #007bff; font-weight: bold; color: #007bff;}
+        
+        .tab-content { display: none; padding-top:15px; border: 1px solid #dee2e6; border-top:none; background-color:#fff; padding:15px; border-radius: 0 0 8px 8px;}
         .tab-content.active { display: block; }
-        label, input, select { display: block; margin-bottom: 8px; }
-        input[type="text"], input[type="number"], select { width: calc(100% - 22px); padding: 8px; border: 1px solid #ccc; border-radius: 4px;}
-        input[type="file"] { padding: 3px;}
-        input[type="color"] { padding: 0px; height: 30px; width: 50px; vertical-align: middle; margin-left: 5px;}
-        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top:5px; margin-bottom: 5px;}
+        
+        label { display: block; margin-bottom: 5px; font-weight: 500; font-size:0.9em; }
+        input[type="text"], input[type="number"], select { 
+            width: calc(100% - 24px); padding: 10px; border: 1px solid #ced4da; border-radius: 4px;
+            margin-bottom: 10px; box-sizing: border-box;
+        }
+        input[type="file"] { padding: 8px; border: 1px solid #ced4da; border-radius: 4px; margin-bottom:10px; display: block; width: calc(100% - 20px); }
+        input[type="color"] { padding: 0px; height: 35px; width: 55px; vertical-align: middle; margin-left: 8px; border: 1px solid #ced4da; border-radius:4px; cursor:pointer;}
+        
+        button { 
+            padding: 10px 18px; background-color: #007bff; color: white; border: none; 
+            border-radius: 4px; cursor: pointer; margin: 8px 4px 8px 0; font-size:0.95em;
+            transition: background-color 0.2s ease-in-out;
+        }
         button:hover { background-color: #0056b3; }
-        button:disabled { background-color: #cccccc; cursor: not-allowed; }
-        #previewCanvasTrain { border: 1px solid #ccc; background-color: #f0f0f0; cursor: default; max-width: 100%; height: auto; image-rendering: pixelated; }
-        #previewCanvasRun { border: 1px solid #ccc; background-color: #f0f0f0; max-width: 100%; height: auto; image-rendering: pixelated; cursor: default; }
+        button:disabled { background-color: #e9ecef; color:#6c757d; cursor: not-allowed; }
+
+        /* Canvas specific styles */
+        .canvas-container { margin-bottom: 15px; text-align: center; }
+        #trainerDrawCanvas, #previewCanvasRun { 
+            border: 1px solid #adb5bd; background-color: #f8f9fa; 
+            max-width: 100%; height: auto; image-rendering: pixelated; 
+            width: 256px; height: 256px; /* Consistent fixed size */
+            display: inline-block; /* Allow centering */
+        }
         #previewCanvasRun.erase-mode { cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path fill='black' d='M5.414 20.586L19.556 6.444l-1.414-1.414L4 19.172zM4 20a1 1 0 001.414.086L20.586 4.914A1 1 0 0020 4H5a1 1 0 00-1 1v15z'/><rect x='3' y='18' width='18' height='3' fill='grey'/></svg>") 12 12, auto; }
         #previewCanvasRun.draw-mode { cursor: crosshair; }
+        #trainerDrawCanvas.active-draw { cursor: crosshair; }
 
-        pre { background-color: #f8f8f8; border:1px solid #eee; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.85em; max-height: 100px; overflow-y: auto;}
-        .status-box { margin-top:10px; padding:10px; border-radius:4px; font-size: 0.9em; background-color: #e9ecef; min-height: 40px; text-align: left;}
-        .global-status-message { margin-top:15px; padding:10px; border-radius:4px; font-size: 0.9em; text-align: center;}
-        .success { background-color: #d4edda; border: 1px solid #c3e6cb; color: #155724;}
-        .error { background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24;}
+
+        pre { background-color: #f1f3f5; border:1px solid #dee2e6; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.8em; max-height: 120px; overflow-y: auto;}
+        .status-box { margin-top:12px; padding:12px; border-radius:4px; font-size: 0.9em; background-color: #e9ecef; min-height: 45px; text-align: left; border: 1px solid #ced4da;}
+        .global-status-message { margin: 15px 0; padding:12px; border-radius:4px; font-size: 0.95em; text-align: center;}
+        .success { background-color: #d1e7dd; border-color: #badbcc; color: #0f5132;}
+        .error { background-color: #f8d7da; border-color: #f5c2c7; color: #842029;}
         .hidden { display: none; }
-        fieldset { margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; padding: 10px;}
-        legend { font-weight: bold; padding: 0 5px; color: #333 }
-        .tool-options label { display: inline-block; margin-right: 10px;}
+        fieldset { margin-bottom: 18px; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px;}
+        legend { font-weight: 600; padding: 0 8px; color: #495057; font-size:1.05em; }
+        .tool-options label { display: inline-block; margin-right: 10px; font-weight:normal; font-size:0.9em;}
+        .tool-options input[type="radio"] { vertical-align: middle; margin-right: 3px;}
+        small { font-size: 0.8em; color: #6c757d; display: block; margin-top: -5px; margin-bottom: 10px;}
+        hr { border: 0; height: 1px; background: #dee2e6; margin: 20px 0; }
     </style>
 </head>
 <body>
@@ -52,14 +75,23 @@
             <div id="TrainTab" class="tab-content active">
                 <h2>Trainer Controls</h2>
                 <fieldset>
-                    <legend>1. Load Target Image</legend>
-                    <label for="emojiInput">Emoji:</label>
-                    <input type="text" id="emojiInput" value="🦎">
-                    <button id="loadEmojiBtnTrain">Load Emoji for Trainer</button>
-                    <br>
-                    <label for="imageFileInputTrain">Or Upload Image (PNG, JPG):</label>
-                    <input type="file" id="imageFileInputTrain" accept="image/png, image/jpeg">
-                    <button id="loadImageFileBtnTrain">Load Image File for Trainer</button>
+                    <legend>1. Define Target Pattern</legend>
+                    <div>
+                        <label>Draw Pattern on Canvas Below:</label>
+                        <div class="tool-options">
+                            <label for="trainDrawColorPicker">Color:</label>
+                            <input type="color" id="trainDrawColorPicker" value="#000000">
+                            <button id="clearTrainCanvasBtn">Clear Drawing</button>
+                            <!-- Undo/Redo can be added later if needed -->
+                        </div>
+                        <button id="confirmDrawingBtnTrain">Confirm Drawing as Target</button>
+                    </div>
+                    <hr style="margin: 15px 0;">
+                    <div>
+                        <label for="imageFileInputTrain">Or Upload Image File (PNG, JPG):</label>
+                        <input type="file" id="imageFileInputTrain" accept="image/png, image/jpeg">
+                        <button id="loadImageFileBtnTrain">Load Image File for Trainer</button>
+                    </div>
                 </fieldset>
 
                 <fieldset>
@@ -72,20 +104,20 @@
                     </select>
                     <label for="fireRateTrain">Fire Rate:</label>
                     <input type="number" id="fireRateTrain" value="0.5" step="0.05" min="0" max="1">
-                    <label for="damageNTrain" id="damageNLabelTrain">Damage N (for Regenerating):</label>
-                    <input type="number" id="damageNTrain" value="3" step="1" min="0">
+                    <label for="damageNTrain" id="damageNLabelTrain" style="display:none;">Damage N (for Regenerating):</label>
+                    <input type="number" id="damageNTrain" value="3" step="1" min="0" style="display:none;">
                     <label for="batchSizeTrain">Batch Size:</label>
                     <input type="number" id="batchSizeTrain" value="8" step="1" min="1">
                     <label for="poolSizeTrain">Pool Size:</label>
                     <input type="number" id="poolSizeTrain" value="1024" step="64" min="1">
                 </fieldset>
                 
-                <button id="initTrainerBtn">Initialize Trainer</button>
+                <button id="initTrainerBtn" disabled>Initialize Trainer with Target</button>
                 <button id="startTrainingBtn" disabled>Start Training</button>
                 <button id="stopTrainingBtn" disabled>Stop Training</button>
                 <button id="saveTrainerModelBtn" disabled>Save Trained Model</button>
 
-                <div class="status-box" id="trainingStatus">Status: Idle</div>
+                <div class="status-box" id="trainingStatus">Status: Define a target pattern above.</div>
                 <div id="trainingModelInfo">
                     <h4>Trainer Model Parameters:</h4>
                     <pre id="trainModelParamsText">N/A</pre>
@@ -96,11 +128,13 @@
             <div id="RunTab" class="tab-content">
                 <h2>Runner Controls</h2>
                 <fieldset>
-                    <legend>1. Load Pre-trained Model</legend>
-                    <label for="modelFileInputRun">Upload Model (.h5):</label>
+                    <legend>1. Load Model</legend>
+                    <label for="modelFileInputRun">Upload Model File (.h5):</label>
                     <input type="file" id="modelFileInputRun" accept=".h5">
-                    <button id="loadModelBtnRun">Load Model for Runner</button>
-                    <small>If no file chosen, server tries to load a recent one.</small>
+                    <button id="loadModelBtnRun">Load from File</button>
+                    <br>
+                    <button id="loadCurrentTrainingModelBtnRun" disabled>Load Current Training Model</button>
+                    <small>If no file chosen for "Load from File", server tries a recent one.</small>
                 </fieldset>
                 <hr>
                 <button id="startRunningLoopBtn" disabled>Start Running Loop</button>
@@ -113,24 +147,23 @@
                 <fieldset>
                     <legend>Interaction Tools</legend>
                     <div class="tool-options">
-                        <label><input type="radio" name="toolMode" value="erase" checked id="toolModeErase"> Erase</label>
-                        <label><input type="radio" name="toolMode" value="draw" id="toolModeDraw"> Draw</label>
-                        <input type="color" id="drawColorPickerRun" value="#ff0000" title="Draw color">
+                        <label><input type="radio" name="runToolMode" value="erase" checked id="runToolModeErase"> Erase</label>
+                        <label><input type="radio" name="runToolMode" value="draw" id="runToolModeDraw"> Draw</label>
+                        <input type="color" id="runDrawColorPicker" value="#ff0000" title="Draw color">
                     </div>
-                    <label for="brushSizeSliderRun">Brush Size:</label> <!-- Renamed from eraserSize -->
-                    <input type="range" id="brushSizeSliderRun" min="1" max="30" value="5" disabled> <!-- Increased max -->
-                    <span id="brushSizeValueRun">5</span>
+                    <label for="runBrushSizeSlider">Brush Size:</label>
+                    <input type="range" id="runBrushSizeSlider" min="1" max="30" value="10" disabled>
+                    <span id="runBrushSizeValue">10</span>
                 </fieldset>
 
                 <fieldset>
                     <legend>Speed Control</legend>
-                    <label for="fpsSliderRun">Target FPS:</label>
-                    <input type="range" id="fpsSliderRun" min="1" max="60" value="20" disabled>
-                    <span id="fpsValueRun">20</span> FPS
+                    <label for="runFpsSlider">Target FPS:</label>
+                    <input type="range" id="runFpsSlider" min="1" max="60" value="20" disabled>
+                    <span id="runFpsValue">20</span> FPS
                 </fieldset>
 
-
-                <div class="status-box" id="runStatus">Status: Idle</div>
+                <div class="status-box" id="runStatus">Status: Load a model to start.</div>
                  <div id="runModelInfo">
                     <h4>Runner Model Info:</h4>
                     <pre id="runModelParamsText">N/A</pre>
@@ -141,12 +174,18 @@
         <div class="display">
             <h2>Preview Area</h2>
             <div id="TrainPreviewArea" class="preview-area active">
-                <h4>Training Progress</h4>
-                <img id="previewCanvasTrain" src="" alt="Training Preview Area">
+                <h4>Trainer Target / Progress</h4>
+                <!-- This will be replaced by a canvas for drawing, or show an img for uploaded target / training progress -->
+                <div class="canvas-container">
+                    <canvas id="trainerDrawCanvas" width="256" height="256"></canvas> <!-- Fixed size, matching DRAW_CANVAS_DISPLAY_SIZE -->
+                    <img id="trainerProgressImg" src="" alt="Training Progress" style="display:none; width: 256px; height: 256px; border: 1px solid #adb5bd; background-color: #f8f9fa;">
+                </div>
             </div>
-             <div id="RunPreviewArea" class.="preview-area" style="display:none;">
+             <div id="RunPreviewArea" class="preview-area" style="display:none;">
                 <h4>NCA Runner</h4>
-                <img id="previewCanvasRun" src="" alt="Run Preview Area">
+                 <div class="canvas-container">
+                    <img id="previewCanvasRun" src="" alt="Run Preview Area"> <!-- Fixed size via CSS for #previewCanvasRun -->
+                </div>
             </div>
         </div>
     </div>
