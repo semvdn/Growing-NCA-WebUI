@@ -8,3 +8,4 @@ DEFAULT_FIRE_RATE = 0.5
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_POOL_SIZE = 1024
 HISTORY_MAX_SIZE = 200 # Max history steps for runner to prevent memory issues
+DEFAULT_RUNNER_SLEEP_DURATION = 0.05 # Corresponds to 20 FPS
