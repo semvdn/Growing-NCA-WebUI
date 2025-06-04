@@ -6,7 +6,7 @@ let runningStatusIntervalId = null;
 const previewCanvasTrainImgEl = document.getElementById('previewCanvasTrain');
 const previewCanvasRunImgEl = document.getElementById('previewCanvasRun');
 
-// --- DOM Elements (Trainer - IDs assumed from HTML) ---
+// ... (Other DOM Elements remain the same) ...
 const loadEmojiBtnTrain = document.getElementById('loadEmojiBtnTrain');
 const imageFileInputTrain = document.getElementById('imageFileInputTrain');
 const loadImageFileBtnTrain = document.getElementById('loadImageFileBtnTrain');
@@ -26,7 +26,6 @@ const saveTrainerModelBtn = document.getElementById('saveTrainerModelBtn');
 const trainingStatusDiv = document.getElementById('trainingStatus');
 const trainModelParamsText = document.getElementById('trainModelParamsText');
 
-// --- DOM Elements (Runner - IDs assumed from HTML) ---
 const modelFileInputRun = document.getElementById('modelFileInputRun');
 const loadModelBtnRun = document.getElementById('loadModelBtnRun');
 const startRunningLoopBtn = document.getElementById('startRunningLoopBtn');
@@ -49,13 +48,14 @@ const runModelParamsText = document.getElementById('runModelParamsText');
 
 const globalStatusMessageEl = document.getElementById('globalStatusMessage');
 
+
 // --- State Variables ---
 let trainerInitialized = false;
 let trainingLoopActive = false;
 let runnerModelLoaded = false;
 let runnerLoopActive = false;
-let currentToolMode = 'erase'; // 'erase' or 'draw'
-
+let currentToolMode = 'erase'; 
+let isInteractingWithCanvas = false; // Flag for drag interactions
 
 // --- Utility Functions (showGlobalStatus, postRequest, postFormRequest - same as before) ---
 function showGlobalStatus(message, isSuccess) {
@@ -64,7 +64,6 @@ function showGlobalStatus(message, isSuccess) {
     globalStatusMessageEl.classList.remove('hidden');
     setTimeout(() => { globalStatusMessageEl.classList.add('hidden'); }, 6000);
 }
-
 async function postRequest(url = '', data = {}) { 
     const response = await fetch(url, {
         method: 'POST',
@@ -73,7 +72,6 @@ async function postRequest(url = '', data = {}) {
     });
     return response.json();
 }
-
 async function postFormRequest(url = '', formData = new FormData()) { 
     const response = await fetch(url, {
         method: 'POST',
@@ -82,7 +80,7 @@ async function postFormRequest(url = '', formData = new FormData()) {
     return response.json();
 }
 
-// --- UI Update Functions ---
+// --- UI Update Functions (updateTrainerControlsAvailability, updateRunnerControlsAvailability - same as before) ---
 function updateTrainerControlsAvailability() {
     loadEmojiBtnTrain.disabled = trainingLoopActive;
     loadImageFileBtnTrain.disabled = trainingLoopActive;
@@ -91,28 +89,25 @@ function updateTrainerControlsAvailability() {
     stopTrainingBtn.disabled = !trainerInitialized || !trainingLoopActive;
     saveTrainerModelBtn.disabled = !trainerInitialized; 
 }
-
 function updateRunnerControlsAvailability() {
     loadModelBtnRun.disabled = runnerLoopActive;
     startRunningLoopBtn.disabled = !runnerModelLoaded || runnerLoopActive;
-    stopRunningLoopBtn.disabled = !runnerModelLoaded || !runnerLoopActive; // Enable stop if loaded & loop active
+    stopRunningLoopBtn.disabled = !runnerModelLoaded || !runnerLoopActive; 
     resetRunnerStateBtn.disabled = !runnerModelLoaded; 
     
-    // History and tools can be used if model is loaded, regardless of loop state
     rewindBtnRun.disabled = !runnerModelLoaded; 
     skipForwardBtnRun.disabled = !runnerModelLoaded;
     brushSizeSliderRun.disabled = !runnerModelLoaded;
     toolModeEraseRadio.disabled = !runnerModelLoaded;
     toolModeDrawRadio.disabled = !runnerModelLoaded;
     drawColorPickerRun.disabled = !runnerModelLoaded || currentToolMode !== 'draw';
-    fpsSliderRun.disabled = !runnerModelLoaded; // Can set speed even if paused
+    fpsSliderRun.disabled = !runnerModelLoaded; 
 
-    // Update canvas cursor based on tool mode
     if (runnerModelLoaded) {
         previewCanvasRunImgEl.classList.toggle('erase-mode', currentToolMode === 'erase');
         previewCanvasRunImgEl.classList.toggle('draw-mode', currentToolMode === 'draw');
     } else {
-        previewCanvasRunImgEl.className = ''; // Reset cursor if no model
+        previewCanvasRunImgEl.className = ''; 
         previewCanvasRunImgEl.style.cursor = 'default';
     }
 }
@@ -140,26 +135,19 @@ function openTab(evt, tabId) {
     } else if (tabId === 'RunTab') {
         if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
         if (runnerModelLoaded && !runningStatusIntervalId) { 
-            // runningStatusIntervalId = setInterval(fetchRunnerStatus, 300); // Poll faster for runner
+            // runningStatusIntervalId = setInterval(fetchRunnerStatus, 300); 
         }
         fetchRunnerStatus(); 
         updateRunnerControlsAvailability();
     }
 }
 
-// --- Training Tab Logic (mostly same, ensure IDs match HTML) ---
-experimentTypeSelectTrain.addEventListener('change', () => { /* ... */ });
-loadEmojiBtnTrain.addEventListener('click', () => { /* ... using emojiInputTrain ... */ });
-loadImageFileBtnTrain.addEventListener('click', () => { /* ... using imageFileInputTrain ... */ });
-// ... initTrainerBtn, startTrainingBtn, stopTrainingBtn, saveTrainerModelBtn ...
-// ... fetchTrainerStatus ...
-// Minor change to use specific IDs for trainer inputs if they differ from global `emojiInput`
+// --- Training Tab Logic (Same as previous good version) ---
 experimentTypeSelectTrain.addEventListener('change', () => {
     const isRegen = experimentTypeSelectTrain.value === 'Regenerating';
     damageNInputTrain.style.display = isRegen ? 'block' : 'none';
     damageNLabelTrain.style.display = isRegen ? 'block' : 'none';
 });
-
 async function handleLoadTargetForTrainer(formData) {
     const response = await postFormRequest('/load_target', formData);
     showGlobalStatus(response.message, response.success);
@@ -173,13 +161,11 @@ async function handleLoadTargetForTrainer(formData) {
     }
     updateTrainerControlsAvailability();
 }
-
 loadEmojiBtnTrain.addEventListener('click', () => {
     const formData = new FormData();
-    formData.append('emoji', emojiInputTrain.value); // Use specific trainer emoji input if different
+    formData.append('emoji', emojiInputTrain.value); 
     handleLoadTargetForTrainer(formData);
 });
-
 loadImageFileBtnTrain.addEventListener('click', () => {
     if (!imageFileInputTrain.files.length) {
         showGlobalStatus('Please select an image file for the trainer.', false); return;
@@ -188,7 +174,6 @@ loadImageFileBtnTrain.addEventListener('click', () => {
     formData.append('image_file', imageFileInputTrain.files[0]);
     handleLoadTargetForTrainer(formData);
 });
-
 initTrainerBtn.addEventListener('click', async () => {
     const payload = {
         experiment_type: experimentTypeSelectTrain.value,
@@ -214,7 +199,6 @@ initTrainerBtn.addEventListener('click', async () => {
     }
     updateTrainerControlsAvailability();
 });
-
 startTrainingBtn.addEventListener('click', async () => {
     if (!trainerInitialized) return;
     const response = await postRequest('/start_training');
@@ -227,13 +211,11 @@ startTrainingBtn.addEventListener('click', async () => {
     }
     updateTrainerControlsAvailability();
 });
-
 stopTrainingBtn.addEventListener('click', async () => {
-    // if (!trainingLoopActive && !trainerInitialized) return; // Original guard
-    if (!trainerInitialized) { // Simpler: can only stop if trainer exists
+    if (!trainerInitialized) { 
          showGlobalStatus("Trainer not initialized.", false); return;
     }
-    if (!trainingLoopActive && trainerInitialized) { // If initialized but not running, it's already "stopped"
+    if (!trainingLoopActive && trainerInitialized) { 
          showGlobalStatus("Training is not currently running.", false); return;
     }
     const response = await postRequest('/stop_training'); 
@@ -242,13 +224,11 @@ stopTrainingBtn.addEventListener('click', async () => {
     fetchTrainerStatus(); 
     updateTrainerControlsAvailability();
 });
-
 saveTrainerModelBtn.addEventListener('click', async () => {
     if (!trainerInitialized) return; 
     const response = await postRequest('/save_trainer_model');
     showGlobalStatus(response.message, response.success);
 });
-
 async function fetchTrainerStatus() {
     if (currentOpenTab !== 'TrainTab' && trainingStatusIntervalId) { return; }
     if (!trainerInitialized && trainingStatusIntervalId) { 
@@ -258,15 +238,23 @@ async function fetchTrainerStatus() {
     }
     try {
         const response = await fetch('/get_training_status');
-        if (!response.ok) { /* ... error handling ... */ return; }
+        if (!response.ok) { 
+            trainingStatusDiv.textContent = `Trainer status error: ${response.status}`;
+            trainingLoopActive = false; 
+            updateTrainerControlsAvailability(); return; 
+        }
         const data = await response.json();
-        trainingStatusDiv.textContent = data.status_message || `Step: ${data.step || 0}, ...`;
+        trainingStatusDiv.textContent = data.status_message || `Step: ${data.step || 0}, Loss: ${data.loss || 'N/A'}, Time: ${data.training_time || 'N/A'}`;
         if (data.preview_url) previewCanvasTrainImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
         trainingLoopActive = data.is_training; 
         updateTrainerControlsAvailability();
-    } catch (error) { /* ... error handling ... */ }
+    } catch (error) { 
+        trainingStatusDiv.textContent = `Trainer status fetch error: ${error}. Polling might stop.`;
+        trainingLoopActive = false;
+        if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
+        updateTrainerControlsAvailability();
+    }
 }
-
 
 // --- Run Tab Logic ---
 brushSizeSliderRun.addEventListener('input', () => {
@@ -275,9 +263,12 @@ brushSizeSliderRun.addEventListener('input', () => {
 fpsSliderRun.addEventListener('input', async () => {
     const fps = parseInt(fpsSliderRun.value);
     fpsValueRun.textContent = fps;
-    if (runnerModelLoaded) { // Only send if a model is loaded
+    if (runnerModelLoaded) { 
         const response = await postRequest('/set_runner_speed', { fps: fps });
-        // showGlobalStatus(response.message, response.success); // Optional: less verbose
+        if (response.success && runnerLoopActive && runningStatusIntervalId) { 
+            clearInterval(runningStatusIntervalId);
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / fps));
+        }
     }
 });
 
@@ -288,9 +279,6 @@ toolModeEraseRadio.addEventListener('change', () => {
 toolModeDrawRadio.addEventListener('change', () => {
     if (toolModeDrawRadio.checked) currentToolMode = 'draw';
     updateRunnerControlsAvailability(); 
-});
-drawColorPickerRun.addEventListener('change', () => {
-    // Color is picked up when draw action occurs
 });
 
 
@@ -306,11 +294,12 @@ loadModelBtnRun.addEventListener('click', async () => {
         runnerModelLoaded = true;
         runnerLoopActive = false; 
         if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); 
+        const initialFps = parseInt(fpsSliderRun.value);
         if (!runningStatusIntervalId && currentOpenTab === 'RunTab') {
-             runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / parseInt(fpsSliderRun.value))); // Initial interval based on FPS
+             runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / initialFps)); 
         }
-        runStatusDiv.textContent = "Status: Runner: Model loaded. FPS: " + fpsSliderRun.value;
-        fpsSliderRun.dispatchEvent(new Event('input')); // Trigger FPS update to backend
+        runStatusDiv.textContent = "Status: Runner: Model loaded. FPS: " + initialFps;
+        fpsSliderRun.dispatchEvent(new Event('input')); 
     } else {
         runnerModelLoaded = false;
     }
@@ -324,24 +313,20 @@ startRunningLoopBtn.addEventListener('click', async () => {
     if (response.success) {
         runnerLoopActive = true;
         if (!runningStatusIntervalId && currentOpenTab === 'RunTab') { 
-            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / parseInt(fpsSliderRun.value)));
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / parseInt(fpsSliderRun.value))); 
         }
     }
     updateRunnerControlsAvailability();
 });
 
 stopRunningLoopBtn.addEventListener('click', async () => {
-    // if (!runnerLoopActive && !runnerModelLoaded) return; // Original guard
     if(!runnerModelLoaded) {
         showGlobalStatus("Runner: No model loaded to stop.", false); return;
     }
-    if (!runnerLoopActive && runnerModelLoaded) {
-        showGlobalStatus("Runner loop is not currently active.", false); return;
-    }
-
+    console.log("Stop Running Loop button clicked by user. runnerLoopActive (client-side):", runnerLoopActive);
     const response = await postRequest('/stop_running');
     showGlobalStatus(response.message, response.success);
-    runnerLoopActive = false; 
+    // runnerLoopActive will be updated by fetchRunnerStatus
     fetchRunnerStatus(); 
     updateRunnerControlsAvailability();
 });
@@ -360,33 +345,54 @@ skipForwardBtnRun.addEventListener('click', async () => handleRunnerAction('skip
 async function handleRunnerAction(action, params = {}) {
     if (!runnerModelLoaded) return;
     const payload = { action, ...params };
+    // console.log("handleRunnerAction sending:", payload); 
     const response = await postRequest('/runner_action', payload);
-    // showGlobalStatus(response.message, response.success); // Can be too verbose for history nav
+    
     if(response.success && response.preview_url) {
-        previewCanvasRunImgEl.src = `${response.preview_url}?t=${new Date().getTime()}`;
-        runStatusDiv.textContent = response.message || `Runner: ${action} at step ${response.history_step}/${response.total_history-1}.`;
+        previewCanvasRunImgEl.src = `${response.preview_url}?t=${new Date().getTime()}`; // Update preview
+        const currentFPS = parseFloat(fpsSliderRun.value).toFixed(1); // Use client's current FPS for message
+        runStatusDiv.textContent = `${response.message} (Target: ${currentFPS} FPS)`;
+         if (action !== 'modify_area') { 
+            // showGlobalStatus(response.message, response.success); // Can be too verbose
+        }
     } else if (!response.success) {
-        showGlobalStatus(response.message, false); // Show errors
+        showGlobalStatus(response.message, false); 
     }
-    updateRunnerControlsAvailability(); 
+    // No need to call updateRunnerControlsAvailability if only preview/status text changes
+    // unless action might change runnerLoopActive (e.g. reset could imply stop)
+    if (action === 'reset_runner') {
+        runnerLoopActive = false; // Reset implies loop stops
+        updateRunnerControlsAvailability();
+    }
 }
 
-previewCanvasRunImgEl.addEventListener('click', (event) => {
+// --- Canvas Interaction for Runner ---
+function performCanvasAction(event, isDrag = false) {
     if (!runnerModelLoaded || currentOpenTab !== 'RunTab' ) return; 
-    // Erase/Draw can happen whether loop is active or paused. Backend lock handles synchrony.
-
+    
     const rect = previewCanvasRunImgEl.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return; 
 
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
+    // Prevent action if click is outside the image bounds (can happen with mouseleave quickly)
+    if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+        if (isDrag) isInteractingWithCanvas = false; // Stop drag if mouse leaves
+        return;
+    }
+
     const normX = Math.max(0, Math.min(1, x / rect.width)); 
     const normY = Math.max(0, Math.min(1, y / rect.height));
     
     const brushSliderVal = parseInt(brushSizeSliderRun.value); 
-    const normBrushFactor = (brushSliderVal / 30) * 0.20 + 0.01; // Map 1-30 to ~0.01 - 0.21
+    const normBrushFactor = (brushSliderVal / 30) * 0.20 + 0.01; 
 
+    // console.log(`  Tool: ${currentToolMode}, Color: ${drawColorPickerRun.value}, normX: ${normX.toFixed(2)}, normY: ${normY.toFixed(2)}, brushFactor: ${normBrushFactor.toFixed(2)}`);
+
+    // Send the action to the backend.
+    // The backend lock handles concurrency with the stepping loop.
+    // For drag, we don't want to show a global status for every mousemove event.
     handleRunnerAction('modify_area', { 
         tool_mode: currentToolMode,
         draw_color_hex: drawColorPickerRun.value,
@@ -396,7 +402,35 @@ previewCanvasRunImgEl.addEventListener('click', (event) => {
         canvas_render_width: rect.width, 
         canvas_render_height: rect.height
     });
+}
+
+previewCanvasRunImgEl.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return; // Only main (left) click
+    if (!runnerModelLoaded || currentOpenTab !== 'RunTab') return;
+    isInteractingWithCanvas = true;
+    performCanvasAction(event); // Perform action on initial click
+    event.preventDefault(); // Prevent text selection or other default drag behaviors
 });
+
+previewCanvasRunImgEl.addEventListener('mousemove', (event) => {
+    if (!isInteractingWithCanvas) return; // Only if mouse button is down
+    performCanvasAction(event, true); // Perform action on drag
+    event.preventDefault();
+});
+
+// Stop interaction when mouse button is released anywhere or mouse leaves canvas
+document.addEventListener('mouseup', (event) => {
+    if (event.button !== 0) return;
+    if (isInteractingWithCanvas) {
+        isInteractingWithCanvas = false;
+    }
+});
+previewCanvasRunImgEl.addEventListener('mouseleave', () => {
+    if (isInteractingWithCanvas) {
+        isInteractingWithCanvas = false;
+    }
+});
+
 
 async function fetchRunnerStatus() {
     if (currentOpenTab !== 'RunTab' && runningStatusIntervalId) { return; }
@@ -408,40 +442,50 @@ async function fetchRunnerStatus() {
     
     try {
         const response = await fetch('/get_runner_status');
-        if (!response.ok) { /* ... error handling ... */ return; }
+        if (!response.ok) { 
+            runStatusDiv.textContent = `Runner status error: ${response.status}`;
+            runnerLoopActive = false;
+            updateRunnerControlsAvailability(); return;
+        }
         const data = await response.json();
         
-        const currentFPS = data.current_fps === "Max" ? "Max" : parseFloat(data.current_fps).toFixed(1);
-        runStatusDiv.textContent = `${data.status_message || 'Status unavailable'} (Target: ${currentFPS} FPS)`;
+        const serverTargetFPS = data.current_fps === "Max" ? "Max" : parseFloat(data.current_fps).toFixed(1);
+        runStatusDiv.textContent = `${data.status_message || 'Status unavailable'} (Target: ${serverTargetFPS} FPS)`;
         
-        if (data.preview_url) previewCanvasRunImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
+        // Only update preview if not currently interacting with canvas (to avoid jitter)
+        // or if the loop is active (meaning backend is driving changes)
+        if (!isInteractingWithCanvas || data.is_loop_active) {
+            if (data.preview_url) previewCanvasRunImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
+        }
         
+        const previousRunnerLoopActiveState = runnerLoopActive;
         runnerLoopActive = data.is_loop_active; 
         
-        // Adjust polling interval based on server's current FPS target, but only if loop is active
-        if (runnerLoopActive && runningStatusIntervalId) {
-            const targetFpsFromServer = parseFloat(data.current_fps);
-            if (targetFpsFromServer && targetFpsFromServer > 0) {
-                const newInterval = Math.max(33, 1000 / targetFpsFromServer); // Min interval 33ms (~30fps cap for updates)
-                clearInterval(runningStatusIntervalId);
-                runningStatusIntervalId = setInterval(fetchRunnerStatus, newInterval);
+        // Adjust polling interval
+        if (runningStatusIntervalId) {
+            clearInterval(runningStatusIntervalId); // Clear previous
+            let newIntervalTime = 1000; 
+            if (runnerLoopActive) {
+                const targetFpsNum = parseFloat(data.current_fps);
+                newIntervalTime = (targetFpsNum && targetFpsNum > 0) ? Math.max(33, 1000 / targetFpsNum) : 50;
             }
-        } else if (!runnerLoopActive && runningStatusIntervalId) {
-            // If loop is paused/stopped, poll less frequently for history updates.
-            const pausedPollInterval = 1000; // e.g. 1 second
-             if(!runningStatusIntervalId || runningStatusIntervalId !== pausedPollInterval) { // Avoid resetting if already correct
-                clearInterval(runningStatusIntervalId);
-                runningStatusIntervalId = setInterval(fetchRunnerStatus, pausedPollInterval);
-             }
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, newIntervalTime);
+        } else if (runnerModelLoaded && currentOpenTab === 'RunTab') { // If interval was cleared but should be running
+             const targetFpsNum = parseFloat(data.current_fps);
+             const intervalTime = (runnerLoopActive && targetFpsNum && targetFpsNum > 0) ? Math.max(33, 1000/targetFpsNum) : 1000;
+             runningStatusIntervalId = setInterval(fetchRunnerStatus, intervalTime);
         }
-
-
         updateRunnerControlsAvailability();
 
-    } catch (error) { /* ... error handling ... */ }
+    } catch (error) { 
+        runStatusDiv.textContent = `Runner status fetch error: ${error}. Polling might stop.`;
+        runnerLoopActive = false; 
+        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); runningStatusIntervalId = null; 
+        updateRunnerControlsAvailability();
+    }
 }
 
-// --- Initial Setup ---
+// --- Initial Setup (Same as previous good version) ---
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('trainTabButton').click(); 
     
