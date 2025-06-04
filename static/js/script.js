@@ -8,9 +8,17 @@ const trainerDrawCanvasEl = document.getElementById('trainerDrawCanvas');
 const trainerProgressImgEl = document.getElementById('trainerProgressImg'); 
 const trainDrawColorPicker = document.getElementById('trainDrawColorPicker');
 const clearTrainCanvasBtn = document.getElementById('clearTrainCanvasBtn');
+const undoTrainCanvasBtn = document.getElementById('undoTrainCanvasBtn');
+const redoTrainCanvasBtn = document.getElementById('redoTrainCanvasBtn');
 const confirmDrawingBtnTrain = document.getElementById('confirmDrawingBtnTrain');
-let trainerCtx = null; 
+const trainBrushSizeSlider = document.getElementById('trainBrushSizeSlider');
+const trainBrushSizeValue = document.getElementById('trainBrushSizeValue');
+const trainBrushOpacitySlider = document.getElementById('trainBrushOpacitySlider');
+const trainBrushOpacityValue = document.getElementById('trainBrushOpacityValue');
+let trainerCtx = null;
 let isDrawingOnTrainerCanvas = false;
+let trainerCanvasHistory = [];
+let trainerCanvasHistoryPointer = -1;
 
 // --- Runner Canvas & Interaction ---
 const previewCanvasRunImgEl = document.getElementById('previewCanvasRun');
@@ -95,16 +103,20 @@ async function postFormRequest(url = '', formData = new FormData()) {
 
 // --- UI Update Functions ---
 function updateTrainerControlsAvailability() {
-    confirmDrawingBtnTrain.disabled = trainingLoopActive; 
+    confirmDrawingBtnTrain.disabled = trainingLoopActive;
     loadImageFileBtnTrain.disabled = trainingLoopActive;
     clearTrainCanvasBtn.disabled = trainingLoopActive;
     trainDrawColorPicker.disabled = trainingLoopActive;
+    trainBrushSizeSlider.disabled = trainingLoopActive;
+    trainBrushOpacitySlider.disabled = trainingLoopActive;
+    undoTrainCanvasBtn.disabled = trainingLoopActive || trainerCanvasHistoryPointer <= 0;
+    redoTrainCanvasBtn.disabled = trainingLoopActive || trainerCanvasHistoryPointer >= trainerCanvasHistory.length - 1;
     
-    initTrainerBtn.disabled = !trainerTargetConfirmed || trainingLoopActive; 
+    initTrainerBtn.disabled = !trainerTargetConfirmed || trainingLoopActive;
     startTrainingBtn.disabled = !trainerInitialized || trainingLoopActive;
     stopTrainingBtn.disabled = !trainerInitialized || !trainingLoopActive;
-    saveTrainerModelBtn.disabled = !trainerInitialized; 
-    loadCurrentTrainingModelBtnRun.disabled = !trainerInitialized || trainingLoopActive; 
+    saveTrainerModelBtn.disabled = !trainerInitialized;
+    loadCurrentTrainingModelBtnRun.disabled = !trainerInitialized || trainingLoopActive;
 }
 
 function updateRunnerControlsAvailability() {
@@ -170,15 +182,16 @@ function initializeTrainerDrawCanvas() {
     trainerDrawCanvasEl.width = DRAW_CANVAS_WIDTH;
     trainerDrawCanvasEl.height = DRAW_CANVAS_HEIGHT;
     trainerCtx = trainerDrawCanvasEl.getContext('2d');
-    trainerCtx.fillStyle = 'white'; 
+    trainerCtx.fillStyle = 'white';
     trainerCtx.fillRect(0, 0, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT);
-    trainerDrawCanvasEl.classList.add('active-draw'); 
-    trainerProgressImgEl.style.display = 'none'; 
+    trainerDrawCanvasEl.classList.add('active-draw');
+    trainerProgressImgEl.style.display = 'none';
     trainerDrawCanvasEl.style.display = 'inline-block';
-    trainerTargetConfirmed = false; 
-    initTrainerBtn.disabled = true; 
+    trainerTargetConfirmed = false;
+    initTrainerBtn.disabled = true;
     updateTrainerControlsAvailability();
-     trainingStatusDiv.textContent = "Status: Draw a pattern on the canvas or load an image file.";
+    trainingStatusDiv.textContent = "Status: Draw a pattern on the canvas or load an image file.";
+    saveTrainerCanvasState();
 }
 
 function clearTrainerDrawCanvas() {
@@ -193,31 +206,76 @@ function clearTrainerDrawCanvas() {
 }
 
 function drawOnTrainerCanvas(event, isDragging) {
-    if (!isDrawingOnTrainerCanvas && !isDragging) return; 
-    if (!trainerCtx || trainingLoopActive) return; 
+    if (!isDrawingOnTrainerCanvas && !isDragging) return;
+    if (!trainerCtx || trainingLoopActive) return;
 
     const rect = trainerDrawCanvasEl.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    trainerCtx.fillStyle = trainDrawColorPicker.value;
+    const brushSize = parseInt(trainBrushSizeSlider.value);
+    const brushOpacity = parseInt(trainBrushOpacitySlider.value) / 100;
+    const color = trainDrawColorPicker.value;
+
+    // Apply opacity to the color
+    const hexToRgb = (hex) => {
+        const bigint = parseInt(hex.slice(1), 16);
+        const r = (bigint >> 16) & 255;
+        const g = (bigint >> 8) & 255;
+        const b = bigint & 255;
+        return `${r},${g},${b}`;
+    };
+    trainerCtx.fillStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`;
+    
     trainerCtx.beginPath();
-    const brushSize = 5; // Can be made configurable
-    trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2); 
+    trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2);
     trainerCtx.fill();
 
-    if (trainerTargetConfirmed) { 
+    if (trainerTargetConfirmed) {
         trainingStatusDiv.textContent = "Status: Drawing modified. Confirm again to use as target.";
     }
-    trainerTargetConfirmed = false; 
+    trainerTargetConfirmed = false;
     initTrainerBtn.disabled = true;
     updateTrainerControlsAvailability();
 }
 
+function saveTrainerCanvasState() {
+    if (!trainerCtx) return;
+    const imageData = trainerCtx.getImageData(0, 0, trainerDrawCanvasEl.width, trainerDrawCanvasEl.height);
+    // If we are not at the end of history, clear future states
+    if (trainerCanvasHistoryPointer < trainerCanvasHistory.length - 1) {
+        trainerCanvasHistory = trainerCanvasHistory.slice(0, trainerCanvasHistoryPointer + 1);
+    }
+    trainerCanvasHistory.push(imageData);
+    trainerCanvasHistoryPointer = trainerCanvasHistory.length - 1;
+    updateTrainerControlsAvailability();
+}
+
+function restoreTrainerCanvasState(imageData) {
+    if (!trainerCtx || !imageData) return;
+    trainerCtx.putImageData(imageData, 0, 0);
+    trainerTargetConfirmed = false;
+    initTrainerBtn.disabled = true;
+    updateTrainerControlsAvailability();
+    trainingStatusDiv.textContent = "Status: Canvas state restored. Confirm again to use as target.";
+}
+
+undoTrainCanvasBtn.addEventListener('click', () => {
+    if (trainingLoopActive || trainerCanvasHistoryPointer <= 0) return;
+    trainerCanvasHistoryPointer--;
+    restoreTrainerCanvasState(trainerCanvasHistory[trainerCanvasHistoryPointer]);
+});
+
+redoTrainCanvasBtn.addEventListener('click', () => {
+    if (trainingLoopActive || trainerCanvasHistoryPointer >= trainerCanvasHistory.length - 1) return;
+    trainerCanvasHistoryPointer++;
+    restoreTrainerCanvasState(trainerCanvasHistory[trainerCanvasHistoryPointer]);
+});
+
 trainerDrawCanvasEl.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || trainingLoopActive) return;
     isDrawingOnTrainerCanvas = true;
-    drawOnTrainerCanvas(e, false); 
+    drawOnTrainerCanvas(e, false);
     e.preventDefault();
 });
 trainerDrawCanvasEl.addEventListener('mousemove', (e) => {
@@ -227,13 +285,20 @@ trainerDrawCanvasEl.addEventListener('mousemove', (e) => {
     }
     e.preventDefault();
 });
-document.addEventListener('mouseup', (e) => { 
+document.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return;
-    isDrawingOnTrainerCanvas = false;
+    if (isDrawingOnTrainerCanvas) {
+        isDrawingOnTrainerCanvas = false;
+        saveTrainerCanvasState(); // Save state after drawing is complete
+    }
 });
 trainerDrawCanvasEl.addEventListener('mouseleave', () => {
-    isDrawingOnTrainerCanvas = false; 
+    if (isDrawingOnTrainerCanvas) {
+        isDrawingOnTrainerCanvas = false;
+        saveTrainerCanvasState(); // Save state if mouse leaves while drawing
+    }
 });
+
 
 clearTrainCanvasBtn.addEventListener('click', () => {
     if (trainingLoopActive) {
@@ -620,6 +685,17 @@ async function fetchRunnerStatus() {
 document.addEventListener('DOMContentLoaded', () => {
     initializeTrainerDrawCanvas(); // Set up trainer drawing canvas first
     document.getElementById('trainTabButton').click(); // Activate TrainTab which will also call updateTrainerControlsAvailability
+    
+    trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
+    trainBrushOpacityValue.textContent = trainBrushOpacitySlider.value + '%';
+
+    trainBrushSizeSlider.addEventListener('input', () => {
+        trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
+    });
+
+    trainBrushOpacitySlider.addEventListener('input', () => {
+        trainBrushOpacityValue.textContent = trainBrushOpacitySlider.value + '%';
+    });
 
     experimentTypeSelectTrain.addEventListener('change', () => {
         const isRegen = experimentTypeSelectTrain.value === 'Regenerating';

@@ -552,11 +552,18 @@ def runner_action_route():
 
 
 if __name__ == '__main__':
+    tf.print(f"TensorFlow Version: {tf.__version__}")
+    tf.print(f"Is TensorFlow built with CUDA: {tf.test.is_built_with_cuda()}")
+    tf.print(f"Is GPU available (tf.test.is_gpu_available): {tf.test.is_gpu_available()}")
+
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
     if physical_devices:
         try:
             for gpu_dev in physical_devices: tf.config.experimental.set_memory_growth(gpu_dev, True)
             tf.print(f"Found GPUs: {physical_devices}, memory growth enabled.")
-        except RuntimeError as e: tf.print(f"GPU Memory Growth Error: {e}")
-    else: tf.print("No GPUs found. Running on CPU.")
-    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False) 
+            tf.print(f"Logical GPUs: {tf.config.experimental.list_logical_devices('GPU')}")
+        except RuntimeError as e:
+            tf.print(f"GPU Memory Growth Error: {e}")
+    else:
+        tf.print("No GPUs found by tf.config.experimental.list_physical_devices('GPU'). Running on CPU.")
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)

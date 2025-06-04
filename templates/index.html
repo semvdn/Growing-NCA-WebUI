@@ -82,7 +82,18 @@
                             <label for="trainDrawColorPicker">Color:</label>
                             <input type="color" id="trainDrawColorPicker" value="#000000">
                             <button id="clearTrainCanvasBtn">Clear Drawing</button>
-                            <!-- Undo/Redo can be added later if needed -->
+                            <button id="undoTrainCanvasBtn" disabled>Undo</button>
+                            <button id="redoTrainCanvasBtn" disabled>Redo</button>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <label for="trainBrushSizeSlider">Brush Size:</label>
+                            <input type="range" id="trainBrushSizeSlider" min="1" max="30" value="5">
+                            <span id="trainBrushSizeValue">5</span>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <label for="trainBrushOpacitySlider">Brush Opacity:</label>
+                            <input type="range" id="trainBrushOpacitySlider" min="0" max="100" value="100">
+                            <span id="trainBrushOpacityValue">100%</span>
                         </div>
                         <button id="confirmDrawingBtnTrain">Confirm Drawing as Target</button>
                     </div>
