@@ -83,6 +83,23 @@
             content: ' \25B6'; /* Right arrow */
             transform: rotate(0deg);
         }
+        /* Capture Tools Styles */
+        .capture-tools-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .capture-tools-container button {
+            margin: 0; /* Override default button margin */
+        }
+        .recording-timer {
+            font-size: 1.1em;
+            color: #007bff;
+            min-width: 50px; /* Ensure space for timer */
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -178,6 +195,16 @@
                 </div>
             </div>
 
+            <fieldset class="collapsible-fieldset">
+                <legend class="collapsible-header">4. Capture Tools</legend>
+                <div class="collapsible-content capture-tools-container">
+                    <button id="takeScreenshotTrainBtn">Take Screenshot</button>
+                    <button id="startRecordingTrainBtn">Start Recording</button>
+                    <button id="stopRecordingTrainBtn" disabled>Stop Recording</button>
+                    <span id="recordingTimerTrain" class="recording-timer">00:00</span>
+                </div>
+            </fieldset>
+
             <!-- Run Tab Content -->
             <div id="RunTab" class="tab-content">
                 <h2>Runner Controls</h2>
@@ -228,6 +255,16 @@
                     <h4>Runner Model Info:</h4>
                     <pre id="runModelParamsText">N/A</pre>
                 </div>
+
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">4. Capture Tools</legend>
+                    <div class="collapsible-content capture-tools-container">
+                        <button id="takeScreenshotRunBtn">Take Screenshot</button>
+                        <button id="startRecordingRunBtn">Start Recording</button>
+                        <button id="stopRecordingRunBtn" disabled>Stop Recording</button>
+                        <span id="recordingTimerRun" class="recording-timer">00:00</span>
+                    </div>
+                </fieldset>
             </div>
         </div>
 
@@ -251,5 +288,6 @@
     </div>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.7/dist/ffmpeg.min.js"></script>
 </body>
 </html>

@@ -49,39 +49,78 @@ const loadTrainerModelBtn = document.getElementById('loadTrainerModelBtn');
 // --- DOM Elements (Runner) ---
 const modelFileInputRun = document.getElementById('modelFileInputRun');
 const loadModelBtnRun = document.getElementById('loadModelBtnRun');
-const loadCurrentTrainingModelBtnRun = document.getElementById('loadCurrentTrainingModelBtnRun'); 
+const loadCurrentTrainingModelBtnRun = document.getElementById('loadCurrentTrainingModelBtnRun');
 const startRunningLoopBtn = document.getElementById('startRunningLoopBtn');
 const stopRunningLoopBtn = document.getElementById('stopRunningLoopBtn');
 const resetRunnerStateBtn = document.getElementById('resetRunnerStateBtn');
 const rewindBtnRun = document.getElementById('rewindBtnRun');
 const skipForwardBtnRun = document.getElementById('skipForwardBtnRun');
 
-const runToolModeEraseRadio = document.getElementById('runToolModeErase'); 
-const runToolModeDrawRadio = document.getElementById('runToolModeDraw');   
-const runDrawColorPicker = document.getElementById('runDrawColorPicker'); 
-const runBrushSizeSlider = document.getElementById('runBrushSizeSlider'); 
-const runBrushSizeValue = document.getElementById('runBrushSizeValue');   
+const runToolModeEraseRadio = document.getElementById('runToolModeErase');
+const runToolModeDrawRadio = document.getElementById('runToolModeDraw');
+const runDrawColorPicker = document.getElementById('runDrawColorPicker');
+const runBrushSizeSlider = document.getElementById('runBrushSizeSlider');
+const runBrushSizeValue = document.getElementById('runBrushSizeValue');
 
-const runFpsSlider = document.getElementById('runFpsSlider'); 
-const runFpsValue = document.getElementById('runFpsValue');   
+const runFpsSlider = document.getElementById('runFpsSlider');
+const runFpsValue = document.getElementById('runFpsValue');
 
 const runStatusDiv = document.getElementById('runStatus');
 const runModelParamsText = document.getElementById('runModelParamsText');
 const globalStatusMessageEl = document.getElementById('globalStatusMessage');
 
+// --- Capture Tool Elements ---
+const takeScreenshotTrainBtn = document.getElementById('takeScreenshotTrainBtn');
+const startRecordingTrainBtn = document.getElementById('startRecordingTrainBtn');
+const stopRecordingTrainBtn = document.getElementById('stopRecordingTrainBtn');
+const recordingTimerTrain = document.getElementById('recordingTimerTrain');
+
+const takeScreenshotRunBtn = document.getElementById('takeScreenshotRunBtn');
+const startRecordingRunBtn = document.getElementById('startRecordingRunBtn');
+const stopRecordingRunBtn = document.getElementById('stopRecordingRunBtn');
+const recordingTimerRun = document.getElementById('recordingTimerRun');
+
 // --- State Variables ---
-let trainerInitialized = false; 
-let trainerTargetConfirmed = false; 
+let trainerInitialized = false;
+let trainerTargetConfirmed = false;
 let trainingLoopActive = false;
 let runnerModelLoaded = false;
 let runnerLoopActive = false;
-let currentRunToolMode = 'erase'; 
-let isInteractingWithRunCanvas = false; 
+let currentRunToolMode = 'erase';
+let isInteractingWithRunCanvas = false;
+
+// --- Capture State Variables ---
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingTimerIntervalId = null;
+let recordingStartTime = 0;
+let pausedRecordingDuration = 0; // To accumulate time when NCA is paused
+let isRecording = false;
+let ffmpeg = null;
+let ffmpegLoaded = false;
 
 // --- Constants ---
-const DRAW_CANVAS_WIDTH = 256; 
+const DRAW_CANVAS_WIDTH = 256;
 const DRAW_CANVAS_HEIGHT = 256;
 
+// --- FFmpeg.wasm Integration ---
+async function loadFFmpeg() {
+    if (ffmpegLoaded) return;
+    ffmpeg = new FFmpeg();
+    ffmpeg.on('log', ({ message }) => console.log(`[ffmpeg.wasm] ${message}`));
+    ffmpeg.on('progress', ({ progress, time }) => {
+        // Optional: Update a progress bar in the UI
+        console.log(`FFmpeg progress: ${Math.round(progress * 100)}% time: ${time / 1000}s`);
+    });
+    try {
+        await ffmpeg.load();
+        ffmpegLoaded = true;
+        console.log('ffmpeg.wasm loaded successfully.');
+    } catch (error) {
+        console.error('Failed to load ffmpeg.wasm:', error);
+        showGlobalStatus('Failed to load video encoder. Video recording will not work.', false);
+    }
+}
 
 // --- Utility Functions ---
 function showGlobalStatus(message, isSuccess) {
@@ -98,12 +137,138 @@ async function postRequest(url = '', data = {}) {
     });
     return response.json();
 }
-async function postFormRequest(url = '', formData = new FormData()) { 
+async function postFormRequest(url = '', formData = new FormData()) {
     const response = await fetch(url, {
         method: 'POST',
-        body: formData, 
+        body: formData,
     });
     return response.json();
+}
+
+// --- Capture Logic ---
+function captureCanvasAsImage(sourceElement, filenamePrefix) {
+    let canvasToCapture = document.createElement('canvas');
+    let ctx = canvasToCapture.getContext('2d');
+
+    // Set canvas dimensions to match the source
+    canvasToCapture.width = sourceElement.naturalWidth || sourceElement.width;
+    canvasToCapture.height = sourceElement.naturalHeight || sourceElement.height;
+
+    // Draw the image or canvas content onto the temporary canvas
+    if (sourceElement.tagName === 'IMG') {
+        ctx.drawImage(sourceElement, 0, 0, canvasToCapture.width, canvasToCapture.height);
+    } else if (sourceElement.tagName === 'CANVAS') {
+        ctx.drawImage(sourceElement, 0, 0);
+    } else {
+        console.error('Unsupported element for capture:', sourceElement);
+        return;
+    }
+
+    const dataURL = canvasToCapture.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataURL;
+    a.download = `${filenamePrefix}_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showGlobalStatus('Screenshot captured!', true);
+}
+
+// --- Video Recording Logic ---
+async function startRecording(canvasElement, tabName) {
+    if (!ffmpegLoaded) {
+        showGlobalStatus('FFmpeg not loaded. Cannot start recording.', false);
+        return;
+    }
+    if (isRecording) {
+        showGlobalStatus('Already recording.', false);
+        return;
+    }
+
+    recordedChunks = [];
+    const stream = canvasElement.captureStream(60); // Capture at 60 FPS
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+    mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+            recordedChunks.push(event.data);
+        }
+    };
+
+    mediaRecorder.onstop = async () => {
+        showGlobalStatus('Processing video...', true);
+        const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
+        const inputFilename = 'input.webm';
+        const outputFilename = `NCA_${tabName}_Recording_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.mp4`;
+
+        try {
+            // Write WebM blob to FFmpeg's virtual file system
+            await ffmpeg.writeFile(inputFilename, new Uint8Array(await webmBlob.arrayBuffer()));
+
+            // Run FFmpeg to transcode WebM to MP4
+            await ffmpeg.exec(['-i', inputFilename, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', outputFilename]);
+
+            // Read the output MP4 file
+            const data = await ffmpeg.readFile(outputFilename);
+            const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
+
+            // Create download link
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(mp4Blob);
+            a.download = outputFilename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href); // Clean up URL object
+
+            showGlobalStatus('Video recorded and downloaded!', true);
+        } catch (error) {
+            console.error('FFmpeg transcoding failed:', error);
+            showGlobalStatus('Video recording failed during processing.', false);
+        } finally {
+            recordedChunks = [];
+            isRecording = false;
+            updateTrainerControlsAvailability(); // Re-enable buttons
+            updateRunnerControlsAvailability();
+        }
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    recordingStartTime = Date.now();
+    pausedRecordingDuration = 0; // Reset paused duration
+    startRecordingTimer(tabName); // Start the timer
+    showGlobalStatus('Recording started...', true);
+    updateTrainerControlsAvailability(); // Disable start button
+    updateRunnerControlsAvailability();
+}
+
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        clearInterval(recordingTimerIntervalId);
+        recordingTimerIntervalId = null;
+        // UI updates will happen in mediaRecorder.onstop
+    }
+}
+
+// --- Recording Timer Logic ---
+function updateRecordingTimer(tabName) {
+    let timerSpan = tabName === 'Train' ? recordingTimerTrain : recordingTimerRun;
+    if (!isRecording) {
+        timerSpan.textContent = '00:00';
+        return;
+    }
+
+    let currentElapsed = (Date.now() - recordingStartTime) + pausedRecordingDuration;
+    const minutes = Math.floor(currentElapsed / 60000);
+    const seconds = Math.floor((currentElapsed % 60000) / 1000);
+    timerSpan.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function startRecordingTimer(tabName) {
+    if (recordingTimerIntervalId) clearInterval(recordingTimerIntervalId);
+    recordingTimerIntervalId = setInterval(() => updateRecordingTimer(tabName), 1000);
 }
 
 // --- UI Update Functions ---
@@ -123,30 +288,44 @@ function updateTrainerControlsAvailability() {
     saveTrainerModelBtn.disabled = !trainerInitialized;
     loadCurrentTrainingModelBtnRun.disabled = !trainerInitialized || trainingLoopActive;
     loadTrainerModelBtn.disabled = trainingLoopActive; // New: Disable if training is active
+
+    // Capture Tools
+    const isTrainCanvasVisible = trainerDrawCanvasEl.style.display !== 'none';
+    const isTrainImgVisible = trainerProgressImgEl.style.display !== 'none';
+    takeScreenshotTrainBtn.disabled = !(isTrainCanvasVisible || isTrainImgVisible);
+    startRecordingTrainBtn.disabled = isRecording || !trainingLoopActive || !(isTrainCanvasVisible || isTrainImgVisible);
+    stopRecordingTrainBtn.disabled = !isRecording;
+    recordingTimerTrain.style.display = isRecording ? 'inline' : 'none';
 }
 
 function updateRunnerControlsAvailability() {
     loadModelBtnRun.disabled = runnerLoopActive;
-    loadCurrentTrainingModelBtnRun.disabled = runnerLoopActive || !trainerInitialized; 
+    loadCurrentTrainingModelBtnRun.disabled = runnerLoopActive || !trainerInitialized;
     startRunningLoopBtn.disabled = !runnerModelLoaded || runnerLoopActive;
-    stopRunningLoopBtn.disabled = !runnerModelLoaded || !runnerLoopActive; 
-    resetRunnerStateBtn.disabled = !runnerModelLoaded; 
+    stopRunningLoopBtn.disabled = !runnerModelLoaded || !runnerLoopActive;
+    resetRunnerStateBtn.disabled = !runnerModelLoaded;
     
-    rewindBtnRun.disabled = !runnerModelLoaded; 
+    rewindBtnRun.disabled = !runnerModelLoaded;
     skipForwardBtnRun.disabled = !runnerModelLoaded;
     runBrushSizeSlider.disabled = !runnerModelLoaded;
     runToolModeEraseRadio.disabled = !runnerModelLoaded;
     runToolModeDrawRadio.disabled = !runnerModelLoaded;
     runDrawColorPicker.disabled = !runnerModelLoaded || currentRunToolMode !== 'draw';
-    runFpsSlider.disabled = !runnerModelLoaded; 
+    runFpsSlider.disabled = !runnerModelLoaded;
 
     if (runnerModelLoaded) {
         previewCanvasRunImgEl.classList.toggle('erase-mode', currentRunToolMode === 'erase');
         previewCanvasRunImgEl.classList.toggle('draw-mode', currentRunToolMode === 'draw');
     } else {
-        previewCanvasRunImgEl.className = ''; 
+        previewCanvasRunImgEl.className = '';
         previewCanvasRunImgEl.style.cursor = 'default';
     }
+
+    // Capture Tools
+    takeScreenshotRunBtn.disabled = !runnerModelLoaded; // Always available if model loaded
+    startRecordingRunBtn.disabled = isRecording || !runnerLoopActive || !runnerModelLoaded;
+    stopRecordingRunBtn.disabled = !isRecording;
+    recordingTimerRun.style.display = isRecording ? 'inline' : 'none';
 }
 
 // --- Tab Management ---
@@ -515,12 +694,23 @@ async function fetchTrainerStatus() {
         }
 
         const prevTrainingLoopActive = trainingLoopActive;
-        trainingLoopActive = data.is_training; 
+        trainingLoopActive = data.is_training;
         updateTrainerControlsAvailability();
+
+        // Handle recording timer based on training loop activity
+        if (isRecording) {
+            if (trainingLoopActive && !prevTrainingLoopActive) { // Loop just became active, resume timer
+                recordingStartTime = Date.now(); // Reset start time to calculate from now
+                startRecordingTimer('Train');
+            } else if (!trainingLoopActive && prevTrainingLoopActive) { // Loop just became inactive, pause timer
+                clearInterval(recordingTimerIntervalId);
+                pausedRecordingDuration += (Date.now() - recordingStartTime); // Accumulate paused time
+            }
+        }
 
         // If training just stopped, ensure interval is cleared or slowed
         if (prevTrainingLoopActive && !trainingLoopActive && trainingStatusIntervalId) {
-            // clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null; 
+            // clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
             // Or keep polling slowly
         } else if (trainingLoopActive && !trainingStatusIntervalId && currentOpenTab === 'TrainTab'){
             // Restart polling if it somehow stopped but should be active
@@ -713,17 +903,29 @@ async function fetchRunnerStatus() {
         if (!isInteractingWithRunCanvas || data.is_loop_active) {
             if (data.preview_url) previewCanvasRunImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
         }
-        runnerLoopActive = data.is_loop_active; 
+        const prevRunnerLoopActive = runnerLoopActive; // Capture previous state
+        runnerLoopActive = data.is_loop_active;
         
+        // Handle recording timer based on runner loop activity
+        if (isRecording) {
+            if (runnerLoopActive && !prevRunnerLoopActive) { // Loop just became active, resume timer
+                recordingStartTime = Date.now(); // Reset start time to calculate from now
+                startRecordingTimer('Run');
+            } else if (!runnerLoopActive && prevRunnerLoopActive) { // Loop just became inactive, pause timer
+                clearInterval(recordingTimerIntervalId);
+                pausedRecordingDuration += (Date.now() - recordingStartTime); // Accumulate paused time
+            }
+        }
+
         if (runningStatusIntervalId) { // Only adjust if an interval is already supposed to be running
-            clearInterval(runningStatusIntervalId); 
-            let newIntervalTime = 1000; 
+            clearInterval(runningStatusIntervalId);
+            let newIntervalTime = 1000;
             if (runnerLoopActive) {
                 const targetFpsNum = parseFloat(data.current_fps); // Use current_fps from status data
                 newIntervalTime = (targetFpsNum && targetFpsNum > 0) ? Math.max(33, 1000 / targetFpsNum) : 50;
             } // else if paused/stopped, it remains 1000ms
             runningStatusIntervalId = setInterval(fetchRunnerStatus, newIntervalTime);
-        } else if (runnerModelLoaded && currentOpenTab === 'RunTab' && !runningStatusIntervalId) { 
+        } else if (runnerModelLoaded && currentOpenTab === 'RunTab' && !runningStatusIntervalId) {
              // If polling stopped but should be active (e.g. after tab switch)
              const targetFpsNum = parseFloat(data.current_fps);
              const intervalTime = (runnerLoopActive && targetFpsNum && targetFpsNum > 0) ? Math.max(33, 1000/targetFpsNum) : 1000;
@@ -746,6 +948,8 @@ document.addEventListener('DOMContentLoaded', () => {
     trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
     trainBrushOpacityValue.textContent = trainBrushOpacitySlider.value + '%';
 
+    loadFFmpeg(); // Load FFmpeg when the page is ready
+
     trainBrushSizeSlider.addEventListener('input', () => {
         trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
     });
@@ -761,15 +965,49 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     experimentTypeSelectTrain.dispatchEvent(new Event('change'));
 
-    runBrushSizeValue.textContent = runBrushSizeSlider.value; 
-    runFpsValue.textContent = runFpsSlider.value;       
-    currentRunToolMode = runToolModeEraseRadio.checked ? 'erase' : 'draw'; 
+    runBrushSizeValue.textContent = runBrushSizeSlider.value;
+    runFpsValue.textContent = runFpsSlider.value;
+    currentRunToolMode = runToolModeEraseRadio.checked ? 'erase' : 'draw';
 
-    const placeholderDim = DRAW_CANVAS_WIDTH; 
+    // --- Capture Tool Event Listeners ---
+    takeScreenshotTrainBtn.addEventListener('click', () => {
+        if (trainerDrawCanvasEl.style.display !== 'none') {
+            captureCanvasAsImage(trainerDrawCanvasEl, 'NCA_Train_Drawing');
+        } else if (trainerProgressImgEl.style.display !== 'none') {
+            captureCanvasAsImage(trainerProgressImgEl, 'NCA_Train_Progress');
+        }
+    });
+    takeScreenshotRunBtn.addEventListener('click', () => {
+        captureCanvasAsImage(previewCanvasRunImgEl, 'NCA_Run_Preview');
+    });
+
+    startRecordingTrainBtn.addEventListener('click', () => {
+        if (trainingLoopActive) {
+            if (trainerDrawCanvasEl.style.display !== 'none') {
+                startRecording(trainerDrawCanvasEl, 'Train_Drawing');
+            } else if (trainerProgressImgEl.style.display !== 'none') {
+                startRecording(trainerProgressImgEl, 'Train_Progress');
+            }
+        } else {
+            showGlobalStatus('Training loop must be active to record video.', false);
+        }
+    });
+    stopRecordingTrainBtn.addEventListener('click', stopRecording);
+
+    startRecordingRunBtn.addEventListener('click', () => {
+        if (runnerLoopActive) {
+            startRecording(previewCanvasRunImgEl, 'Run_Preview');
+        } else {
+            showGlobalStatus('Runner loop must be active to record video.', false);
+        }
+    });
+    stopRecordingRunBtn.addEventListener('click', stopRecording);
+
+    const placeholderDim = DRAW_CANVAS_WIDTH;
     const placeholderColor = '#f0f0f0';
     const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`;
     
-    trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress'); 
+    trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress');
     previewCanvasRunImgEl.src = svgPlaceholder('Runner Preview');
 
     // Initial calls after DOM is ready and tab is set
