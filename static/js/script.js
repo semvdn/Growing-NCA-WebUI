@@ -777,4 +777,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // updateRunnerControlsAvailability();   // Called by openTab
     // if (currentOpenTab === 'TrainTab') fetchTrainerStatus(); // Called by openTab
     // else if (currentOpenTab === 'RunTab') fetchRunnerStatus(); // Called by openTab
+
+    // Collapsible Fieldset Logic
+    document.querySelectorAll('.collapsible-fieldset .collapsible-header').forEach(header => {
+        header.addEventListener('click', function() {
+            const fieldset = this.closest('.collapsible-fieldset');
+            fieldset.classList.toggle('collapsed');
+        });
+    });
+
+    // Initially collapse all fieldsets except the first one in each tab
+    document.querySelectorAll('.tab-content').forEach(tabContent => {
+        const fieldsets = tabContent.querySelectorAll('.collapsible-fieldset');
+        if (fieldsets.length > 0) {
+            fieldsets.forEach((fieldset, index) => {
+                if (index > 0) { // Collapse all except the first one
+                    fieldset.classList.add('collapsed');
+                }
+            });
+        }
+    });
 });

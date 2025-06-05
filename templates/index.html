@@ -53,11 +53,36 @@
         .error { background-color: #f8d7da; border-color: #f5c2c7; color: #842029;}
         .hidden { display: none; }
         fieldset { margin-bottom: 18px; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px;}
-        legend { font-weight: 600; padding: 0 8px; color: #495057; font-size:1.05em; }
+        legend { font-weight: 600; padding: 0 8px; color: #495057; font-size:1.05em; cursor: pointer; }
         .tool-options label { display: inline-block; margin-right: 10px; font-weight:normal; font-size:0.9em;}
         .tool-options input[type="radio"] { vertical-align: middle; margin-right: 3px;}
         small { font-size: 0.8em; color: #6c757d; display: block; margin-top: -5px; margin-bottom: 10px;}
         hr { border: 0; height: 1px; background: #dee2e6; margin: 20px 0; }
+
+        /* Collapsible Fieldset Styles */
+        .collapsible-fieldset .collapsible-content {
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            max-height: 1000px; /* Arbitrarily large value for expanded state */
+            opacity: 1;
+        }
+        .collapsible-fieldset.collapsed .collapsible-content {
+            max-height: 0;
+            opacity: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            margin-top: 0;
+            margin-bottom: 0;
+        }
+        .collapsible-fieldset .collapsible-header::after {
+            content: ' \25BC'; /* Down arrow */
+            display: inline-block;
+            transition: transform 0.3s ease-out;
+        }
+        .collapsible-fieldset.collapsed .collapsible-header::after {
+            content: ' \25B6'; /* Right arrow */
+            transform: rotate(0deg);
+        }
     </style>
 </head>
 <body>
@@ -74,57 +99,61 @@
             <!-- Training Tab Content -->
             <div id="TrainTab" class="tab-content active">
                 <h2>Trainer Controls</h2>
-                <fieldset>
-                    <legend>1. Define Target Pattern</legend>
-                    <div>
-                        <label>Draw Pattern on Canvas Below:</label>
-                        <div class="tool-options">
-                            <label for="trainDrawColorPicker">Color:</label>
-                            <input type="color" id="trainDrawColorPicker" value="#000000">
-                            <button id="clearTrainCanvasBtn">Clear Drawing</button>
-                            <button id="undoTrainCanvasBtn" disabled>Undo</button>
-                            <button id="redoTrainCanvasBtn" disabled>Redo</button>
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">1. Define Target Pattern</legend>
+                    <div class="collapsible-content">
+                        <div>
+                            <label>Draw Pattern on Canvas Below:</label>
+                            <div class="tool-options">
+                                <label for="trainDrawColorPicker">Color:</label>
+                                <input type="color" id="trainDrawColorPicker" value="#000000">
+                                <button id="clearTrainCanvasBtn">Clear Drawing</button>
+                                <button id="undoTrainCanvasBtn" disabled>Undo</button>
+                                <button id="redoTrainCanvasBtn" disabled>Redo</button>
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <label for="trainBrushSizeSlider">Brush Size:</label>
+                                <input type="range" id="trainBrushSizeSlider" min="1" max="30" value="5">
+                                <span id="trainBrushSizeValue">5</span>
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <label for="trainBrushOpacitySlider">Brush Opacity:</label>
+                                <input type="range" id="trainBrushOpacitySlider" min="0" max="100" value="100">
+                                <span id="trainBrushOpacityValue">100%</span>
+                            </div>
+                            <button id="confirmDrawingBtnTrain">Confirm Drawing as Target</button>
                         </div>
-                        <div style="margin-top: 10px;">
-                            <label for="trainBrushSizeSlider">Brush Size:</label>
-                            <input type="range" id="trainBrushSizeSlider" min="1" max="30" value="5">
-                            <span id="trainBrushSizeValue">5</span>
+                        <div class="form-group mt-2">
+                            <label for="trainerDrawnImageNameInput">Name for Drawn Image:</label>
+                            <input type="text" class="form-control" id="trainerDrawnImageNameInput" placeholder="e.g., MyCustomPattern">
                         </div>
-                        <div style="margin-top: 10px;">
-                            <label for="trainBrushOpacitySlider">Brush Opacity:</label>
-                            <input type="range" id="trainBrushOpacitySlider" min="0" max="100" value="100">
-                            <span id="trainBrushOpacityValue">100%</span>
+                        <hr style="margin: 15px 0;">
+                        <div>
+                            <label for="imageFileInputTrain">Or Upload Image File (PNG, JPG):</label>
+                            <input type="file" id="imageFileInputTrain" accept="image/png, image/jpeg">
+                            <button id="loadImageFileBtnTrain">Load Image File for Trainer</button>
                         </div>
-                        <button id="confirmDrawingBtnTrain">Confirm Drawing as Target</button>
-                    </div>
-                    <div class="form-group mt-2">
-                        <label for="trainerDrawnImageNameInput">Name for Drawn Image:</label>
-                        <input type="text" class="form-control" id="trainerDrawnImageNameInput" placeholder="e.g., MyCustomPattern">
-                    </div>
-                    <hr style="margin: 15px 0;">
-                    <div>
-                        <label for="imageFileInputTrain">Or Upload Image File (PNG, JPG):</label>
-                        <input type="file" id="imageFileInputTrain" accept="image/png, image/jpeg">
-                        <button id="loadImageFileBtnTrain">Load Image File for Trainer</button>
                     </div>
                 </fieldset>
 
-                <fieldset>
-                    <legend>2. Configure Training</legend>
-                    <label for="experimentType">Experiment Type:</label>
-                    <select id="experimentType">
-                        <option value="Growing">Growing</option>
-                        <option value="Persistent">Persistent</option>
-                        <option value="Regenerating">Regenerating</option>
-                    </select>
-                    <label for="fireRateTrain">Fire Rate:</label>
-                    <input type="number" id="fireRateTrain" value="0.5" step="0.05" min="0" max="1">
-                    <label for="damageNTrain" id="damageNLabelTrain" style="display:none;">Damage N (for Regenerating):</label>
-                    <input type="number" id="damageNTrain" value="3" step="1" min="0" style="display:none;">
-                    <label for="batchSizeTrain">Batch Size:</label>
-                    <input type="number" id="batchSizeTrain" value="8" step="1" min="1">
-                    <label for="poolSizeTrain">Pool Size:</label>
-                    <input type="number" id="poolSizeTrain" value="1024" step="64" min="1">
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">2. Configure Training</legend>
+                    <div class="collapsible-content">
+                        <label for="experimentType">Experiment Type:</label>
+                        <select id="experimentType">
+                            <option value="Growing">Growing</option>
+                            <option value="Persistent">Persistent</option>
+                            <option value="Regenerating">Regenerating</option>
+                        </select>
+                        <label for="fireRateTrain">Fire Rate:</label>
+                        <input type="number" id="fireRateTrain" value="0.5" step="0.05" min="0" max="1">
+                        <label for="damageNTrain" id="damageNLabelTrain" style="display:none;">Damage N (for Regenerating):</label>
+                        <input type="number" id="damageNTrain" value="3" step="1" min="0" style="display:none;">
+                        <label for="batchSizeTrain">Batch Size:</label>
+                        <input type="number" id="batchSizeTrain" value="8" step="1" min="1">
+                        <label for="poolSizeTrain">Pool Size:</label>
+                        <input type="number" id="poolSizeTrain" value="1024" step="64" min="1">
+                    </div>
                 </fieldset>
                 
                 <button id="initTrainerBtn" disabled>Initialize Trainer with Target</button>
@@ -132,12 +161,14 @@
                 <button id="stopTrainingBtn" disabled>Stop Training</button>
                 <button id="saveTrainerModelBtn" disabled>Save Trained Model</button>
 
-                <fieldset style="margin-top: 18px;">
-                    <legend>3. Load Existing Model to Continue Training</legend>
-                    <label for="loadTrainerModelFileInput">Upload Model File (.weights.h5):</label>
-                    <input type="file" id="loadTrainerModelFileInput" accept=".weights.h5">
-                    <button id="loadTrainerModelBtn">Load Trainer Model</button>
-                    <small>Loads weights and training state to continue training.</small>
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">3. Load Existing Model to Continue Training</legend>
+                    <div class="collapsible-content">
+                        <label for="loadTrainerModelFileInput">Upload Model File (.weights.h5):</label>
+                        <input type="file" id="loadTrainerModelFileInput" accept=".weights.h5">
+                        <button id="loadTrainerModelBtn">Load Trainer Model</button>
+                        <small>Loads weights and training state to continue training.</small>
+                    </div>
                 </fieldset>
 
                 <div class="status-box" id="trainingStatus">Status: Define a target pattern above.</div>
@@ -150,14 +181,16 @@
             <!-- Run Tab Content -->
             <div id="RunTab" class="tab-content">
                 <h2>Runner Controls</h2>
-                <fieldset>
-                    <legend>1. Load Model</legend>
-                    <label for="modelFileInputRun">Upload Model File (.h5):</label>
-                    <input type="file" id="modelFileInputRun" accept=".h5">
-                    <button id="loadModelBtnRun">Load from File</button>
-                    <br>
-                    <button id="loadCurrentTrainingModelBtnRun" disabled>Load Current Training Model</button>
-                    <small>If no file chosen for "Load from File", server tries a recent one.</small>
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">1. Load Model</legend>
+                    <div class="collapsible-content">
+                        <label for="modelFileInputRun">Upload Model File (.h5):</label>
+                        <input type="file" id="modelFileInputRun" accept=".h5">
+                        <button id="loadModelBtnRun">Load from File</button>
+                        <br>
+                        <button id="loadCurrentTrainingModelBtnRun" disabled>Load Current Training Model</button>
+                        <small>If no file chosen for "Load from File", server tries a recent one.</small>
+                    </div>
                 </fieldset>
                 <hr>
                 <button id="startRunningLoopBtn" disabled>Start Running Loop</button>
@@ -167,23 +200,27 @@
                 <button id="rewindBtnRun" disabled><< Rewind</button>
                 <button id="skipForwardBtnRun" disabled>Skip Forward >></button>
                 
-                <fieldset>
-                    <legend>Interaction Tools</legend>
-                    <div class="tool-options">
-                        <label><input type="radio" name="runToolMode" value="erase" checked id="runToolModeErase"> Erase</label>
-                        <label><input type="radio" name="runToolMode" value="draw" id="runToolModeDraw"> Draw</label>
-                        <input type="color" id="runDrawColorPicker" value="#ff0000" title="Draw color">
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">Interaction Tools</legend>
+                    <div class="collapsible-content">
+                        <div class="tool-options">
+                            <label><input type="radio" name="runToolMode" value="erase" checked id="runToolModeErase"> Erase</label>
+                            <label><input type="radio" name="runToolMode" value="draw" id="runToolModeDraw"> Draw</label>
+                            <input type="color" id="runDrawColorPicker" value="#ff0000" title="Draw color">
+                        </div>
+                        <label for="runBrushSizeSlider">Brush Size:</label>
+                        <input type="range" id="runBrushSizeSlider" min="1" max="30" value="10" disabled>
+                        <span id="runBrushSizeValue">10</span>
                     </div>
-                    <label for="runBrushSizeSlider">Brush Size:</label>
-                    <input type="range" id="runBrushSizeSlider" min="1" max="30" value="10" disabled>
-                    <span id="runBrushSizeValue">10</span>
                 </fieldset>
 
-                <fieldset>
-                    <legend>Speed Control</legend>
-                    <label for="runFpsSlider">Target FPS:</label>
-                    <input type="range" id="runFpsSlider" min="1" max="60" value="20" disabled>
-                    <span id="runFpsValue">20</span> FPS
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">Speed Control</legend>
+                    <div class="collapsible-content">
+                        <label for="runFpsSlider">Target FPS:</label>
+                        <input type="range" id="runFpsSlider" min="1" max="60" value="20" disabled>
+                        <span id="runFpsValue">20</span> FPS
+                    </div>
                 </fieldset>
 
                 <div class="status-box" id="runStatus">Status: Load a model to start.</div>
