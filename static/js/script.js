@@ -71,8 +71,6 @@ const loadCurrentTrainingModelBtnRun = document.getElementById('loadCurrentTrain
 const startRunningLoopBtn = document.getElementById('startRunningLoopBtn');
 const stopRunningLoopBtn = document.getElementById('stopRunningLoopBtn');
 const resetRunnerStateBtn = document.getElementById('resetRunnerStateBtn');
-const rewindBtnRun = document.getElementById('rewindBtnRun');
-const skipForwardBtnRun = document.getElementById('skipForwardBtnRun');
 
 const runToolModeEraseRadio = document.getElementById('runToolModeErase');
 const runToolModeDrawRadio = document.getElementById('runToolModeDraw');
@@ -325,8 +323,6 @@ function updateRunnerControlsAvailability() {
     stopRunningLoopBtn.disabled = !runnerModelLoaded || !runnerLoopActive;
     resetRunnerStateBtn.disabled = !runnerModelLoaded;
     
-    rewindBtnRun.disabled = !runnerModelLoaded;
-    skipForwardBtnRun.disabled = !runnerModelLoaded;
     runBrushSizeSlider.disabled = !runnerModelLoaded;
     runToolModeEraseRadio.disabled = !runnerModelLoaded;
     runToolModeDrawRadio.disabled = !runnerModelLoaded;
@@ -1043,8 +1039,6 @@ resetRunnerStateBtn.addEventListener('click', async () => {
     runnerLoopActive = false; 
     updateRunnerControlsAvailability();
 });
-rewindBtnRun.addEventListener('click', async () => handleRunnerAction('rewind'));
-skipForwardBtnRun.addEventListener('click', async () => handleRunnerAction('skip_forward'));
 async function handleRunnerAction(action, params = {}) {
     if (!runnerModelLoaded) return;
     const payload = { action, ...params };
@@ -1078,45 +1072,6 @@ function performCanvasAction(event) { // Removed isDrag parameter
     const brushSize = parseInt(runBrushSizeSlider.value);
     const drawColor = runDrawColorPicker.value;
 
-    // Set global composite operation based on tool mode
-    if (currentRunToolMode === 'erase') {
-        previewCanvasRunCtx.globalCompositeOperation = 'destination-out'; // Erase mode
-    } else {
-        previewCanvasRunCtx.globalCompositeOperation = 'source-over'; // Draw mode
-    }
-
-    // Set brush style
-    previewCanvasRunCtx.lineWidth = brushSize * 2; // Use brushSize as radius, so lineWidth is diameter
-    previewCanvasRunCtx.lineCap = 'round';
-    previewCanvasRunCtx.lineJoin = 'round';
-
-    // For drawing, set stroke style
-    const hexToRgb = (hex) => {
-        const bigint = parseInt(hex.slice(1), 16);
-        const r = (bigint >> 16) & 255;
-        const g = (bigint >> 8) & 255;
-        const b = bigint & 255;
-        return `${r},${g},${b}`;
-    };
-    previewCanvasRunCtx.strokeStyle = `rgba(${hexToRgb(drawColor)}, 1)`; // Opacity is not a slider for runner, assume 1
-    previewCanvasRunCtx.fillStyle = `rgba(${hexToRgb(drawColor)}, 1)`; // For initial dot
-
-    if (lastXRun === -1 || lastYRun === -1) { // First point of a new stroke
-        previewCanvasRunCtx.beginPath();
-        previewCanvasRunCtx.arc(x, y, brushSize, 0, Math.PI * 2); // Draw a dot for the initial click
-        previewCanvasRunCtx.fill();
-    } else { // Subsequent points, draw a line segment
-        previewCanvasRunCtx.beginPath();
-        previewCanvasRunCtx.moveTo(lastXRun, lastYRun);
-        previewCanvasRunCtx.lineTo(x, y);
-        previewCanvasRunCtx.stroke();
-    }
-
-    // Update last coordinates for the next segment
-    lastXRun = x;
-    lastYRun = y;
-
-    // Send action to backend (still send individual points, backend will handle its own continuity)
     const normX = Math.max(0, Math.min(1, x / rect.width));
     const normY = Math.max(0, Math.min(1, y / rect.height));
     const normBrushFactor = (brushSize / 30) * 0.20 + 0.01;
@@ -1179,8 +1134,13 @@ async function fetchRunnerStatus() {
         }
         const data = await response.json();
         
+        let statusMessage = data.status_message || 'Status unavailable';
+        // Remove "Step: X/Y, " or "Step: X/Y" from the beginning of the status message
+        statusMessage = statusMessage.replace(/^Step: \d+\/\d+,?\s*/, '');
+
         const targetFPSDisplay = data.current_fps === "Max" ? "Max" : parseFloat(data.current_fps).toFixed(1);
         const actualFPSDisplay = data.actual_fps || "N/A"; // Get actual_fps from data
+        runStatusDiv.textContent = `${statusMessage} (Target: ${targetFPSDisplay} FPS, Actual: ${actualFPSDisplay} FPS)`;
         runStatusDiv.textContent = `${data.status_message || 'Status unavailable'} (Target: ${targetFPSDisplay} FPS, Actual: ${actualFPSDisplay} FPS)`;
 
         // Preview update logic will be changed in Phase 2

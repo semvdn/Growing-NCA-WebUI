@@ -135,7 +135,7 @@ class NCARunner:
                 if active_mask_for_state.shape == (y_max_bound - y_min_bound, x_max_bound - x_min_bound):
                     broadcast_mask = active_mask_for_state[..., np.newaxis]
                     if tool_mode == 'erase':
-                        self.current_state[y_min_bound:y_max_bound, x_min_bound:x_max_bound, :] *= ~broadcast_mask
+                        self.current_state[y_min_bound:y_max_bound, x_min_bound:x_max_bound, :] *= (1 - broadcast_mask.astype(self.current_state.dtype))
                         # tf.print(f"  NCARunner: Area erased.")
                     elif tool_mode == 'draw' and draw_color_hex:
                         try:
