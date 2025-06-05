@@ -103,31 +103,16 @@ let recordingTimerIntervalId = null;
 let recordingStartTime = 0;
 let pausedRecordingDuration = 0; // To accumulate time when NCA is paused
 let isRecording = false;
-let ffmpeg = null;
-let ffmpegLoaded = false;
 
 // --- Constants ---
 const DRAW_CANVAS_WIDTH = 512;
 const DRAW_CANVAS_HEIGHT = 512;
+const TARGET_CAPTURE_DIM = 720; // 10x upscale from 72x72 original resolution
 
-// --- FFmpeg.wasm Integration ---
-async function loadFFmpeg() {
-    if (ffmpegLoaded) return;
-    ffmpeg = new FFmpeg();
-    ffmpeg.on('log', ({ message }) => console.log(`[ffmpeg.wasm] ${message}`));
-    ffmpeg.on('progress', ({ progress, time }) => {
-        // Optional: Update a progress bar in the UI
-        console.log(`FFmpeg progress: ${Math.round(progress * 100)}% time: ${time / 1000}s`);
-    });
-    try {
-        await ffmpeg.load();
-        ffmpegLoaded = true;
-        console.log('ffmpeg.wasm loaded successfully.');
-    } catch (error) {
-        console.error('Failed to load ffmpeg.wasm:', error);
-        showGlobalStatus('Failed to load video encoder. Video recording will not work.', false);
-    }
-}
+// --- High-Res Capture Canvas (hidden) ---
+let highResCaptureCanvas = null;
+let highResCaptureCtx = null;
+
 
 // --- Utility Functions ---
 function showGlobalStatus(message, isSuccess) {
@@ -152,23 +137,53 @@ async function postFormRequest(url = '', formData = new FormData()) {
     return response.json();
 }
 
+// --- Utility for Upscaled Pixel Drawing ---
+function drawUpscaledPixels(targetCtx, targetWidth, targetHeight, rawPixels, rawWidth, rawHeight) {
+    if (!targetCtx || !rawPixels || rawWidth === 0 || rawHeight === 0) return;
+
+    // Create a temporary canvas for the original low-res image
+    const tempLowResCanvas = document.createElement('canvas');
+    tempLowResCanvas.width = rawWidth;
+    tempLowResCanvas.height = rawHeight;
+    const tempLowResCtx = tempLowResCanvas.getContext('2d');
+
+    // Put the raw pixel data onto the temporary low-res canvas
+    const imageData = tempLowResCtx.createImageData(rawWidth, rawHeight);
+    const pixelDataArray = new Uint8ClampedArray(rawPixels);
+    imageData.data.set(pixelDataArray);
+    tempLowResCtx.putImageData(imageData, 0, 0);
+
+    // Draw the low-res canvas onto the target canvas, scaled up
+    targetCtx.imageSmoothingEnabled = false; // Crucial for pixelated scaling
+    targetCtx.clearRect(0, 0, targetWidth, targetHeight);
+    targetCtx.drawImage(tempLowResCanvas, 0, 0, targetWidth, targetHeight);
+}
+
 // --- Capture Logic ---
 function captureCanvasAsImage(sourceElement, filenamePrefix) {
-    let canvasToCapture = document.createElement('canvas');
-    let ctx = canvasToCapture.getContext('2d');
+    let canvasToCapture;
 
-    // Set canvas dimensions to match the source
-    canvasToCapture.width = sourceElement.naturalWidth || sourceElement.width;
-    canvasToCapture.height = sourceElement.naturalHeight || sourceElement.height;
-
-    // Draw the image or canvas content onto the temporary canvas
-    if (sourceElement.tagName === 'IMG') {
-        ctx.drawImage(sourceElement, 0, 0, canvasToCapture.width, canvasToCapture.height);
-    } else if (sourceElement.tagName === 'CANVAS') {
-        ctx.drawImage(sourceElement, 0, 0);
+    if (sourceElement.id === 'previewCanvasRun') {
+        // For the runner canvas, use the pre-rendered high-res capture canvas
+        canvasToCapture = highResCaptureCanvas;
     } else {
-        console.error('Unsupported element for capture:', sourceElement);
-        return;
+        // For other canvases (trainer), create a temporary canvas and draw
+        canvasToCapture = document.createElement('canvas');
+        let ctx = canvasToCapture.getContext('2d');
+
+        // Set canvas dimensions to match the source
+        canvasToCapture.width = sourceElement.naturalWidth || sourceElement.width;
+        canvasToCapture.height = sourceElement.naturalHeight || sourceElement.height;
+
+        // Draw the image or canvas content onto the temporary canvas
+        if (sourceElement.tagName === 'IMG') {
+            ctx.drawImage(sourceElement, 0, 0, canvasToCapture.width, canvasToCapture.height);
+        } else if (sourceElement.tagName === 'CANVAS') {
+            ctx.drawImage(sourceElement, 0, 0);
+        } else {
+            console.error('Unsupported element for capture:', sourceElement);
+            return;
+        }
     }
 
     const dataURL = canvasToCapture.toDataURL('image/png');
@@ -183,18 +198,19 @@ function captureCanvasAsImage(sourceElement, filenamePrefix) {
 
 // --- Video Recording Logic ---
 async function startRecording(canvasElement, tabName) {
-    if (!ffmpegLoaded) {
-        showGlobalStatus('FFmpeg not loaded. Cannot start recording.', false);
-        return;
-    }
     if (isRecording) {
         showGlobalStatus('Already recording.', false);
         return;
     }
 
     recordedChunks = [];
-    const stream = canvasElement.captureStream(60); // Capture at 60 FPS
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    let streamSourceCanvas = canvasElement;
+    if (canvasElement.id === 'previewCanvasRun') {
+        // For runner canvas, capture stream from the high-res capture canvas
+        streamSourceCanvas = highResCaptureCanvas;
+    }
+    const stream = streamSourceCanvas.captureStream(60); // Capture at 60 FPS
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
 
     mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -203,41 +219,24 @@ async function startRecording(canvasElement, tabName) {
     };
 
     mediaRecorder.onstop = async () => {
-        showGlobalStatus('Processing video...', true);
+        showGlobalStatus('Saving video...', true);
         const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
-        const inputFilename = 'input.webm';
         const outputFilename = `NCA_${tabName}_Recording_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.mp4`;
 
-        try {
-            // Write WebM blob to FFmpeg's virtual file system
-            await ffmpeg.writeFile(inputFilename, new Uint8Array(await webmBlob.arrayBuffer()));
+        // Create download link
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(webmBlob);
+        a.download = outputFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href); // Clean up URL object
 
-            // Run FFmpeg to transcode WebM to MP4
-            await ffmpeg.exec(['-i', inputFilename, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', outputFilename]);
-
-            // Read the output MP4 file
-            const data = await ffmpeg.readFile(outputFilename);
-            const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
-
-            // Create download link
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(mp4Blob);
-            a.download = outputFilename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(a.href); // Clean up URL object
-
-            showGlobalStatus('Video recorded and downloaded!', true);
-        } catch (error) {
-            console.error('FFmpeg transcoding failed:', error);
-            showGlobalStatus('Video recording failed during processing.', false);
-        } finally {
-            recordedChunks = [];
-            isRecording = false;
-            updateTrainerControlsAvailability(); // Re-enable buttons
-            updateRunnerControlsAvailability();
-        }
+        showGlobalStatus('Video recorded and downloaded!', true);
+        recordedChunks = [];
+        isRecording = false;
+        updateTrainerControlsAvailability(); // Re-enable buttons
+        updateRunnerControlsAvailability();
     };
 
     mediaRecorder.start();
@@ -955,14 +954,18 @@ async function fetchRunnerStatus() {
                     const rawData = await rawPreviewResponse.json();
                     if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) {
                         if (previewCanvasRunCtx) {
-                            if (previewCanvasRunEl.width !== rawData.width || previewCanvasRunEl.height !== rawData.height) {
-                                previewCanvasRunEl.width = rawData.width;
-                                previewCanvasRunEl.height = rawData.height;
+                            // Ensure the display canvas is always DRAW_CANVAS_WIDTH x DRAW_CANVAS_HEIGHT for consistent UI
+                            if (previewCanvasRunEl.width !== DRAW_CANVAS_WIDTH || previewCanvasRunEl.height !== DRAW_CANVAS_HEIGHT) {
+                                previewCanvasRunEl.width = DRAW_CANVAS_WIDTH;
+                                previewCanvasRunEl.height = DRAW_CANVAS_HEIGHT;
                             }
-                            const imageData = previewCanvasRunCtx.createImageData(rawData.width, rawData.height);
-                            const pixelDataArray = new Uint8ClampedArray(rawData.pixels);
-                            imageData.data.set(pixelDataArray);
-                            previewCanvasRunCtx.putImageData(imageData, 0, 0);
+                            // Draw the raw pixels upscaled to the display canvas (512x512)
+                            drawUpscaledPixels(previewCanvasRunCtx, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT, rawData.pixels, rawData.width, rawData.height);
+                        }
+
+                        // Draw to the high-res capture canvas (720x720)
+                        if (highResCaptureCtx) {
+                            drawUpscaledPixels(highResCaptureCtx, TARGET_CAPTURE_DIM, TARGET_CAPTURE_DIM, rawData.pixels, rawData.width, rawData.height);
                         }
                     } else if (!rawData.success && previewCanvasRunCtx) {
                         // Draw placeholder if runner is not ready but model is loaded
@@ -971,7 +974,7 @@ async function fetchRunnerStatus() {
                         previewCanvasRunCtx.fillStyle = '#555';
                         previewCanvasRunCtx.font = '20px sans-serif';
                         previewCanvasRunCtx.textAlign = 'center';
-                        previewCanvasRunCtx.textBaseline = 'middle'; // Added for vertical centering
+                        previewCanvasRunCtx.textBaseline = 'middle';
                         previewCanvasRunCtx.fillText('Runner State Unavailable', previewCanvasRunEl.width / 2, previewCanvasRunEl.height / 2);
                     }
                 } else {
@@ -1000,7 +1003,13 @@ document.addEventListener('DOMContentLoaded', () => {
     trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
     trainBrushOpacityValue.textContent = trainBrushOpacitySlider.value + '%';
 
-    loadFFmpeg(); // Load FFmpeg when the page is ready
+    // Initialize hidden high-res capture canvas
+    highResCaptureCanvas = document.createElement('canvas');
+    highResCaptureCanvas.width = TARGET_CAPTURE_DIM;
+    highResCaptureCanvas.height = TARGET_CAPTURE_DIM;
+    highResCaptureCtx = highResCaptureCanvas.getContext('2d');
+    highResCaptureCtx.imageSmoothingEnabled = false; // Crucial for pixelated scaling
+
 
     trainBrushSizeSlider.addEventListener('input', () => {
         trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
