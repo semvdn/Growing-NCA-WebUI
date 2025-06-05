@@ -23,6 +23,9 @@ let trainerCanvasHistoryPointer = -1;
 let isEraserModeTrain = false; // New state variable for eraser mode
 let lastX = -1; // To store the last X coordinate for continuous drawing
 let lastY = -1; // To store the last Y coordinate for continuous drawing
+let tempTrainerCanvas = null; // Temporary canvas for current stroke
+let tempTrainerCtx = null; // Context for temporary canvas
+let currentStrokeBaseImageData = null; // Stores the canvas state before the current stroke started
 
 // --- Runner Canvas & Interaction ---
 const previewCanvasRunEl = document.getElementById('previewCanvasRun'); // NEW
@@ -98,6 +101,8 @@ let runnerModelLoaded = false;
 let runnerLoopActive = false;
 let currentRunToolMode = 'erase';
 let isInteractingWithRunCanvas = false;
+let lastXRun = -1; // New: To store the last X coordinate for continuous drawing on runner canvas
+let lastYRun = -1; // New: To store the last Y coordinate for continuous drawing on runner canvas
 
 // --- Capture State Variables ---
 let mediaRecorder = null;
@@ -385,7 +390,16 @@ function initializeTrainerDrawCanvas() {
     initTrainerBtn.disabled = true;
     updateTrainerControlsAvailability();
     trainingStatusDiv.textContent = "Status: Draw a pattern on the canvas or load an image file.";
-    saveTrainerCanvasState();
+    saveTrainerCanvasState(); // Save initial blank state
+
+    // Initialize temporary canvas for drawing strokes
+    if (!tempTrainerCanvas) {
+        tempTrainerCanvas = document.createElement('canvas');
+        tempTrainerCanvas.width = DRAW_CANVAS_WIDTH;
+        tempTrainerCanvas.height = DRAW_CANVAS_HEIGHT;
+        tempTrainerCtx = tempTrainerCanvas.getContext('2d');
+    }
+    tempTrainerCtx.clearRect(0, 0, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT); // Clear temp canvas
 }
 
 function clearTrainerDrawCanvas() {
@@ -398,8 +412,8 @@ function clearTrainerDrawCanvas() {
     }
 }
 
-function drawOnTrainerCanvas(event) { // Removed isDragging parameter, not needed with new logic
-    if (!isDrawingOnTrainerCanvas || trainingLoopActive) return;
+function drawOnTrainerCanvas(event) {
+    if (!isDrawingOnTrainerCanvas || trainingLoopActive || !tempTrainerCtx || !trainerCtx) return;
 
     const rect = trainerDrawCanvasEl.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -409,17 +423,17 @@ function drawOnTrainerCanvas(event) { // Removed isDragging parameter, not neede
     const brushOpacity = parseInt(trainBrushOpacitySlider.value) / 100;
     const color = trainDrawColorPicker.value;
 
-    // Set global composite operation based on eraser mode
+    // Set global composite operation for the temporary canvas
     if (isEraserModeTrain) {
-        trainerCtx.globalCompositeOperation = 'destination-out'; // Erase mode
+        tempTrainerCtx.globalCompositeOperation = 'destination-out'; // Erase mode on temp canvas
     } else {
-        trainerCtx.globalCompositeOperation = 'source-over'; // Draw mode
+        tempTrainerCtx.globalCompositeOperation = 'source-over'; // Draw mode on temp canvas
     }
 
-    // Set brush style
-    trainerCtx.lineWidth = brushSize * 2; // Use brushSize as radius, so lineWidth is diameter
-    trainerCtx.lineCap = 'round';
-    trainerCtx.lineJoin = 'round';
+    // Set brush style for the temporary canvas (always full opacity here)
+    tempTrainerCtx.lineWidth = brushSize * 2;
+    tempTrainerCtx.lineCap = 'round';
+    tempTrainerCtx.lineJoin = 'round';
 
     const hexToRgb = (hex) => {
         const bigint = parseInt(hex.slice(1), 16);
@@ -428,23 +442,35 @@ function drawOnTrainerCanvas(event) { // Removed isDragging parameter, not neede
         const b = bigint & 255;
         return `${r},${g},${b}`;
     };
-    trainerCtx.strokeStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`;
-    trainerCtx.fillStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`; // For initial dot
+    // Draw with full opacity on the temporary canvas
+    tempTrainerCtx.strokeStyle = `rgb(${hexToRgb(color)})`;
+    tempTrainerCtx.fillStyle = `rgb(${hexToRgb(color)})`;
 
     if (lastX === -1 || lastY === -1) { // First point of a new stroke
-        trainerCtx.beginPath();
-        trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2); // Draw a dot for the initial click
-        trainerCtx.fill();
+        tempTrainerCtx.beginPath();
+        tempTrainerCtx.arc(x, y, brushSize, 0, Math.PI * 2);
+        tempTrainerCtx.fill();
     } else { // Subsequent points, draw a line segment
-        trainerCtx.beginPath();
-        trainerCtx.moveTo(lastX, lastY);
-        trainerCtx.lineTo(x, y);
-        trainerCtx.stroke();
+        tempTrainerCtx.beginPath();
+        tempTrainerCtx.moveTo(lastX, lastY);
+        tempTrainerCtx.lineTo(x, y);
+        tempTrainerCtx.stroke();
     }
 
     // Update last coordinates for the next segment
     lastX = x;
     lastY = y;
+
+    // Now, draw the temporary canvas onto the main canvas with the desired opacity
+    // First, restore the main canvas to its state *before* this stroke started
+    trainerCtx.clearRect(0, 0, trainerDrawCanvasEl.width, trainerDrawCanvasEl.height);
+    if (currentStrokeBaseImageData) {
+        trainerCtx.putImageData(currentStrokeBaseImageData, 0, 0); // Draw base
+    }
+
+    trainerCtx.globalAlpha = brushOpacity; // Apply overall opacity for the stroke
+    trainerCtx.drawImage(tempTrainerCanvas, 0, 0); // Draw temp on top with opacity
+    trainerCtx.globalAlpha = 1; // Reset globalAlpha for future operations
 
     if (trainerTargetConfirmed) {
         trainingStatusDiv.textContent = "Status: Drawing modified. Confirm again to use as target.";
@@ -490,10 +516,14 @@ redoTrainCanvasBtn.addEventListener('click', () => {
 trainerDrawCanvasEl.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || trainingLoopActive) return;
     isDrawingOnTrainerCanvas = true;
-    // Set initial lastX, lastY for the first point of the stroke
     const rect = trainerDrawCanvasEl.getBoundingClientRect();
     lastX = e.clientX - rect.left;
     lastY = e.clientY - rect.top;
+
+    // Save the current state of the main canvas before starting the new stroke
+    currentStrokeBaseImageData = trainerCtx.getImageData(0, 0, trainerDrawCanvasEl.width, trainerDrawCanvasEl.height);
+    tempTrainerCtx.clearRect(0, 0, tempTrainerCanvas.width, tempTrainerCanvas.height); // Clear temp canvas for new stroke
+
     drawOnTrainerCanvas(e); // Draw the first point (dot)
     e.preventDefault();
 });
@@ -510,7 +540,8 @@ document.addEventListener('mouseup', (e) => {
         isDrawingOnTrainerCanvas = false;
         lastX = -1; // Reset last coordinates
         lastY = -1;
-        saveTrainerCanvasState(); // Save state after drawing is complete
+        currentStrokeBaseImageData = null; // Clear base image data
+        saveTrainerCanvasState(); // Save the final state of trainerCtx
     }
 });
 trainerDrawCanvasEl.addEventListener('mouseleave', () => {
@@ -518,6 +549,7 @@ trainerDrawCanvasEl.addEventListener('mouseleave', () => {
         isDrawingOnTrainerCanvas = false;
         lastX = -1; // Reset last coordinates
         lastY = -1;
+        currentStrokeBaseImageData = null; // Clear base image data
         saveTrainerCanvasState(); // Save state if mouse leaves while drawing
     }
 });
@@ -875,46 +907,106 @@ async function handleRunnerAction(action, params = {}) {
     if (action === 'reset_runner') { runnerLoopActive = false; } 
     updateRunnerControlsAvailability(); 
 }
-function performCanvasAction(event, isDrag = false) {
-    if (!runnerModelLoaded || currentOpenTab !== 'RunTab' ) return; 
-    const rect = previewCanvasRunEl.getBoundingClientRect(); // Use canvas element
-    if (rect.width === 0 || rect.height === 0) return; 
-    const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+function performCanvasAction(event) { // Removed isDrag parameter
+    if (!runnerModelLoaded || currentOpenTab !== 'RunTab') return;
+
+    const rect = previewCanvasRunEl.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // Check if mouse is within canvas bounds
     if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
-        if (isDrag) isInteractingWithRunCanvas = false; return;
+        // If mouse leaves canvas during drag, stop interaction and reset last coordinates
+        if (isInteractingWithRunCanvas) {
+            isInteractingWithRunCanvas = false;
+            lastXRun = -1;
+            lastYRun = -1;
+        }
+        return;
     }
-    const normX = Math.max(0, Math.min(1, x / rect.width)); 
+
+    const brushSize = parseInt(runBrushSizeSlider.value);
+    const drawColor = runDrawColorPicker.value;
+
+    // Set global composite operation based on tool mode
+    if (currentRunToolMode === 'erase') {
+        previewCanvasRunCtx.globalCompositeOperation = 'destination-out'; // Erase mode
+    } else {
+        previewCanvasRunCtx.globalCompositeOperation = 'source-over'; // Draw mode
+    }
+
+    // Set brush style
+    previewCanvasRunCtx.lineWidth = brushSize * 2; // Use brushSize as radius, so lineWidth is diameter
+    previewCanvasRunCtx.lineCap = 'round';
+    previewCanvasRunCtx.lineJoin = 'round';
+
+    // For drawing, set stroke style
+    const hexToRgb = (hex) => {
+        const bigint = parseInt(hex.slice(1), 16);
+        const r = (bigint >> 16) & 255;
+        const g = (bigint >> 8) & 255;
+        const b = bigint & 255;
+        return `${r},${g},${b}`;
+    };
+    previewCanvasRunCtx.strokeStyle = `rgba(${hexToRgb(drawColor)}, 1)`; // Opacity is not a slider for runner, assume 1
+    previewCanvasRunCtx.fillStyle = `rgba(${hexToRgb(drawColor)}, 1)`; // For initial dot
+
+    if (lastXRun === -1 || lastYRun === -1) { // First point of a new stroke
+        previewCanvasRunCtx.beginPath();
+        previewCanvasRunCtx.arc(x, y, brushSize, 0, Math.PI * 2); // Draw a dot for the initial click
+        previewCanvasRunCtx.fill();
+    } else { // Subsequent points, draw a line segment
+        previewCanvasRunCtx.beginPath();
+        previewCanvasRunCtx.moveTo(lastXRun, lastYRun);
+        previewCanvasRunCtx.lineTo(x, y);
+        previewCanvasRunCtx.stroke();
+    }
+
+    // Update last coordinates for the next segment
+    lastXRun = x;
+    lastYRun = y;
+
+    // Send action to backend (still send individual points, backend will handle its own continuity)
+    const normX = Math.max(0, Math.min(1, x / rect.width));
     const normY = Math.max(0, Math.min(1, y / rect.height));
-    const brushSliderVal = parseInt(runBrushSizeSlider.value); 
-    const normBrushFactor = (brushSliderVal / 30) * 0.20 + 0.01; 
-    handleRunnerAction('modify_area', { 
-        tool_mode: currentRunToolMode, 
-        draw_color_hex: runDrawColorPicker.value, 
+    const normBrushFactor = (brushSize / 30) * 0.20 + 0.01;
+    handleRunnerAction('modify_area', {
+        tool_mode: currentRunToolMode,
+        draw_color_hex: drawColor,
         norm_x: normX, norm_y: normY, brush_size_norm: normBrushFactor,
         canvas_render_width: rect.width, canvas_render_height: rect.height
     });
 }
-previewCanvasRunEl.addEventListener('mousedown', (event) => { // Changed to previewCanvasRunEl
-    if (event.button !== 0) return; 
+
+previewCanvasRunEl.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return;
     if (!runnerModelLoaded || currentOpenTab !== 'RunTab') return;
     isInteractingWithRunCanvas = true;
-    performCanvasAction(event); 
-    event.preventDefault(); 
+    // Set initial lastXRun, lastYRun for the first point of the stroke
+    const rect = previewCanvasRunEl.getBoundingClientRect();
+    lastXRun = event.clientX - rect.left;
+    lastYRun = event.clientY - rect.top;
+    performCanvasAction(event); // Draw the first point (dot)
+    event.preventDefault();
 });
-previewCanvasRunEl.addEventListener('mousemove', (event) => { // Changed to previewCanvasRunEl
-    if (!isInteractingWithRunCanvas) return; 
-    performCanvasAction(event, true); 
+previewCanvasRunEl.addEventListener('mousemove', (event) => {
+    if (!isInteractingWithRunCanvas) return;
+    performCanvasAction(event); // Draw continuous line segments
     event.preventDefault();
 });
 document.addEventListener('mouseup', (event) => {
     if (event.button !== 0) return;
     if (isInteractingWithRunCanvas) {
         isInteractingWithRunCanvas = false;
+        lastXRun = -1; // Reset last coordinates
+        lastYRun = -1;
     }
 });
-previewCanvasRunEl.addEventListener('mouseleave', () => { // Changed to previewCanvasRunEl
+previewCanvasRunEl.addEventListener('mouseleave', () => {
     if (isInteractingWithRunCanvas) {
         isInteractingWithRunCanvas = false;
+        lastXRun = -1; // Reset last coordinates
+        lastYRun = -1;
     }
 });
 
