@@ -10,6 +10,7 @@ const trainDrawColorPicker = document.getElementById('trainDrawColorPicker');
 const clearTrainCanvasBtn = document.getElementById('clearTrainCanvasBtn');
 const undoTrainCanvasBtn = document.getElementById('undoTrainCanvasBtn');
 const redoTrainCanvasBtn = document.getElementById('redoTrainCanvasBtn');
+const trainerDrawnImageNameInput = document.getElementById('trainerDrawnImageNameInput');
 const confirmDrawingBtnTrain = document.getElementById('confirmDrawingBtnTrain');
 const trainBrushSizeSlider = document.getElementById('trainBrushSizeSlider');
 const trainBrushSizeValue = document.getElementById('trainBrushSizeValue');
@@ -40,6 +41,10 @@ const stopTrainingBtn = document.getElementById('stopTrainingBtn');
 const saveTrainerModelBtn = document.getElementById('saveTrainerModelBtn');
 const trainingStatusDiv = document.getElementById('trainingStatus');
 const trainModelParamsText = document.getElementById('trainModelParamsText');
+
+// New: Load Trainer Model elements
+const loadTrainerModelFileInput = document.getElementById('loadTrainerModelFileInput');
+const loadTrainerModelBtn = document.getElementById('loadTrainerModelBtn');
 
 // --- DOM Elements (Runner) ---
 const modelFileInputRun = document.getElementById('modelFileInputRun');
@@ -117,6 +122,7 @@ function updateTrainerControlsAvailability() {
     stopTrainingBtn.disabled = !trainerInitialized || !trainingLoopActive;
     saveTrainerModelBtn.disabled = !trainerInitialized;
     loadCurrentTrainingModelBtnRun.disabled = !trainerInitialized || trainingLoopActive;
+    loadTrainerModelBtn.disabled = trainingLoopActive; // New: Disable if training is active
 }
 
 function updateRunnerControlsAvailability() {
@@ -310,13 +316,22 @@ clearTrainCanvasBtn.addEventListener('click', () => {
 
 confirmDrawingBtnTrain.addEventListener('click', async () => {
     if (trainingLoopActive || !trainerCtx) return;
+    const drawnImageName = trainerDrawnImageNameInput.value.trim();
+    if (!drawnImageName) {
+        showGlobalStatus("Please enter a name for your drawn image.", false);
+        return;
+    }
+
     const imageDataUrl = trainerDrawCanvasEl.toDataURL('image/png');
-    const response = await postRequest('/upload_drawn_pattern_target', { image_data_url: imageDataUrl });
+    const response = await postRequest('/upload_drawn_pattern_target', {
+        image_data_url: imageDataUrl,
+        drawn_image_name: drawnImageName
+    });
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         trainerTargetConfirmed = true;
-        trainerDrawCanvasEl.style.display = 'none'; 
-        trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; 
+        trainerDrawCanvasEl.style.display = 'none';
+        trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`;
         trainerProgressImgEl.style.display = 'inline-block';
         trainingStatusDiv.textContent = "Status: Drawn pattern confirmed. Initialize Trainer.";
     }
@@ -357,6 +372,7 @@ loadImageFileBtnTrain.addEventListener('click', () => {
     }
     const formData = new FormData();
     formData.append('image_file', imageFileInputTrain.files[0]);
+    formData.append('image_filename', imageFileInputTrain.files[0].name); // Pass filename explicitly
     handleLoadTargetForTrainerFromFile(formData);
 });
 
@@ -429,6 +445,38 @@ saveTrainerModelBtn.addEventListener('click', async () => {
     if (!trainerInitialized) return; 
     const response = await postRequest('/save_trainer_model');
     showGlobalStatus(response.message, response.success);
+});
+
+loadTrainerModelBtn.addEventListener('click', async () => {
+    if (trainingLoopActive) {
+        showGlobalStatus("Cannot load model while training is active. Please stop training first.", false);
+        return;
+    }
+    if (!loadTrainerModelFileInput.files.length) {
+        showGlobalStatus('Please select a .weights.h5 model file to load.', false);
+        return;
+    }
+    const formData = new FormData();
+    formData.append('model_file', loadTrainerModelFileInput.files[0]);
+
+    const response = await postFormRequest('/load_trainer_model', formData);
+    showGlobalStatus(response.message, response.success);
+    if (response.success) {
+        trainerInitialized = true;
+        trainingLoopActive = false; // Ensure training loop is not active after loading
+        if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId);
+        if (!trainingStatusIntervalId && currentOpenTab === 'TrainTab') {
+            trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
+        }
+        trainModelParamsText.textContent = response.model_summary || 'N/A';
+        trainingStatusDiv.textContent = "Status: Trainer model loaded. Ready to continue training.";
+        // Optionally, update other UI elements based on loaded metadata if needed
+        // e.g., experimentTypeSelectTrain.value = response.metadata.experiment_type;
+    } else {
+        trainerInitialized = false;
+        trainingStatusDiv.textContent = "Status: Failed to load trainer model.";
+    }
+    updateTrainerControlsAvailability();
 });
 
 async function fetchTrainerStatus() {
@@ -533,17 +581,25 @@ loadModelBtnRun.addEventListener('click', async () => {
     const response = await postFormRequest('/load_model_for_runner', formData);
     showGlobalStatus(response.message, response.success);
     if (response.success) {
-        runModelParamsText.textContent = response.model_summary || 'N/A';
+        let modelInfoText = response.model_summary || 'N/A';
+        if (response.metadata) {
+            modelInfoText += `\n--- Metadata ---\n`;
+            modelInfoText += `Trained on: ${response.metadata.trained_on_image || 'N/A'}\n`;
+            modelInfoText += `Steps: ${response.metadata.training_steps || 'N/A'}\n`;
+            modelInfoText += `Experiment: ${response.metadata.experiment_type || 'N/A'}\n`;
+            modelInfoText += `Saved: ${response.metadata.save_datetime || 'N/A'}\n`;
+        }
+        runModelParamsText.textContent = modelInfoText; // Updated to display metadata
         previewCanvasRunImgEl.src = `${response.runner_preview_url}?t=${new Date().getTime()}`;
         runnerModelLoaded = true;
-        runnerLoopActive = false; 
-        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); 
-        const initialFps = parseInt(runFpsSlider.value); 
+        runnerLoopActive = false;
+        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId);
+        const initialFps = parseInt(runFpsSlider.value);
         if (!runningStatusIntervalId && currentOpenTab === 'RunTab') {
-             runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / initialFps)); 
+             runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / initialFps));
         }
         runStatusDiv.textContent = "Status: Runner: Model loaded. FPS: " + initialFps;
-        runFpsSlider.dispatchEvent(new Event('input')); 
+        runFpsSlider.dispatchEvent(new Event('input'));
     } else {
         runnerModelLoaded = false;
     }

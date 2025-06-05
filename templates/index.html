@@ -97,6 +97,10 @@
                         </div>
                         <button id="confirmDrawingBtnTrain">Confirm Drawing as Target</button>
                     </div>
+                    <div class="form-group mt-2">
+                        <label for="trainerDrawnImageNameInput">Name for Drawn Image:</label>
+                        <input type="text" class="form-control" id="trainerDrawnImageNameInput" placeholder="e.g., MyCustomPattern">
+                    </div>
                     <hr style="margin: 15px 0;">
                     <div>
                         <label for="imageFileInputTrain">Or Upload Image File (PNG, JPG):</label>
@@ -127,6 +131,14 @@
                 <button id="startTrainingBtn" disabled>Start Training</button>
                 <button id="stopTrainingBtn" disabled>Stop Training</button>
                 <button id="saveTrainerModelBtn" disabled>Save Trained Model</button>
+
+                <fieldset style="margin-top: 18px;">
+                    <legend>3. Load Existing Model to Continue Training</legend>
+                    <label for="loadTrainerModelFileInput">Upload Model File (.weights.h5):</label>
+                    <input type="file" id="loadTrainerModelFileInput" accept=".weights.h5">
+                    <button id="loadTrainerModelBtn">Load Trainer Model</button>
+                    <small>Loads weights and training state to continue training.</small>
+                </fieldset>
 
                 <div class="status-box" id="trainingStatus">Status: Define a target pattern above.</div>
                 <div id="trainingModelInfo">

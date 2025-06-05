@@ -3,15 +3,16 @@
 
 import os
 import io
+import json # New: For saving metadata to JSON files
 import time
 import threading
-import traceback 
+import traceback
 import numpy as np
-import tensorflow as tf 
-from flask import Flask, render_template, request, jsonify, send_file 
+import tensorflow as tf
+from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-import PIL.Image 
-import base64 
+import PIL.Image
+import base64
 
 from nca_globals import (TARGET_SIZE, TARGET_PADDING, DEFAULT_FIRE_RATE, 
                          DEFAULT_BATCH_SIZE, DEFAULT_POOL_SIZE, CHANNEL_N,
@@ -37,6 +38,8 @@ current_nca_trainer = None
 trainer_target_image_rgba = None # For "file": TARGET_SIZE content; For "drawn_defines_padded_grid": (TARGET_SIZE+2*PAD) image
 trainer_target_source_kind = None # "file" or "drawn_defines_padded_grid"
 trainer_actual_target_shape = None # Shape of the final target used by trainer (e.g. (72,72,4))
+trainer_target_image_name = "unknown_image" # Stores the name of the image used for training target (file name or drawn name)
+trainer_target_image_loaded_or_drawn = "unknown" # "loaded" or "drawn"
 
 current_nca_runner = None
 runner_sleep_duration = DEFAULT_RUNNER_SLEEP_DURATION
@@ -103,10 +106,11 @@ def index_route():
 
 @app.route('/upload_drawn_pattern_target', methods=['POST'])
 def upload_drawn_pattern_target():
-    global trainer_target_image_rgba, trainer_actual_target_shape, trainer_target_source_kind
+    global trainer_target_image_rgba, trainer_actual_target_shape, trainer_target_source_kind, trainer_target_image_name, trainer_target_image_loaded_or_drawn
     try:
         data = request.json
         data_url = data.get('image_data_url')
+        drawn_image_name = data.get('drawn_image_name', 'drawn_pattern') # Get the name from the frontend
         if not data_url or not data_url.startswith('data:image/png;base64,'):
             return jsonify({"success": False, "message": "Invalid image data URL."}), 400
 
@@ -140,11 +144,13 @@ def upload_drawn_pattern_target():
         final_target_pil.paste(img_pil_resized, upper_left)
         
         img_np = np.float32(final_target_pil) / 255.0
-        img_np[..., :3] *= img_np[..., 3:] 
+        img_np[..., :3] *= img_np[..., 3:]
         
-        trainer_target_image_rgba = img_np 
+        trainer_target_image_rgba = img_np
         trainer_target_source_kind = "drawn_defines_padded_grid" # New kind
         trainer_actual_target_shape = trainer_target_image_rgba.shape # This is now (72,72,4) e.g.
+        trainer_target_image_name = drawn_image_name # Store the user-provided name
+        trainer_target_image_loaded_or_drawn = "drawn" # Indicate it was drawn
         
         tf.print(f"Trainer target from DRAWN pattern (defines full grid). Final shape: {trainer_actual_target_shape}")
         return jsonify({"success": True, "message": "Drawn pattern set as trainer target (defines full grid)."}), 200
@@ -153,29 +159,31 @@ def upload_drawn_pattern_target():
         return jsonify({"success": False, "message": f"Error processing drawn pattern: {str(e_detail)}"}), 500
 
 
-@app.route('/load_target_from_file', methods=['POST']) 
-def load_target_from_file_route(): 
-    global trainer_target_image_rgba, trainer_actual_target_shape, trainer_target_source_kind
+@app.route('/load_target_from_file', methods=['POST'])
+def load_target_from_file_route():
+    global trainer_target_image_rgba, trainer_actual_target_shape, trainer_target_source_kind, trainer_target_image_name, trainer_target_image_loaded_or_drawn
     try:
         if 'image_file' not in request.files or request.files['image_file'].filename == '':
             return jsonify({"success": False, "message": "No file provided for trainer target."}), 400
             
         file = request.files['image_file']
         filename = secure_filename(file.filename)
+        trainer_target_image_name = filename # Store the filename for metadata
+        trainer_target_image_loaded_or_drawn = "loaded" # Indicate it was loaded
         # load_image_from_file resizes to TARGET_SIZE content area
-        trainer_target_image_rgba = load_image_from_file(file.stream, max_size=TARGET_SIZE) 
+        trainer_target_image_rgba = load_image_from_file(file.stream, max_size=TARGET_SIZE)
         trainer_target_source_kind = "file"
         message = f"Trainer Target: File '{filename}' loaded as content."
-        
+
         # For file targets, trainer_actual_target_shape will be after NCATrainer pads it.
         # We can store the content shape here for reference.
         # trainer_actual_target_shape will be set in initialize_trainer for files.
         # For now, just indicate success.
-        
+
         tf.print(f"Trainer target from FILE loaded, content shape {trainer_target_image_rgba.shape}")
         # The height/width returned here should be of the *content* for files.
-        return jsonify({"success": True, "message": message, 
-                        "target_height": trainer_target_image_rgba.shape[0], 
+        return jsonify({"success": True, "message": message,
+                        "target_height": trainer_target_image_rgba.shape[0],
                         "target_width": trainer_target_image_rgba.shape[1]})
     except Exception as e_detail:
         tf.print(f"Error in /load_target_from_file: {e_detail}\n{traceback.format_exc()}")
@@ -230,7 +238,8 @@ def initialize_trainer_route():
                 "experiment_type": data.get("experiment_type", "Growing"),
                 "target_padding": TARGET_PADDING, # NCATrainer uses this for 'file' source
                 "learning_rate": float(data.get("learning_rate", 2e-3)),
-                "target_source_kind": trainer_target_source_kind # Pass the source kind
+                "target_source_kind": trainer_target_source_kind, # Pass the source kind
+                "model_folder_path": app.config['MODEL_FOLDER'] # Pass the model folder path
             }
             if config["experiment_type"] == "Regenerating":
                 config["damage_n"] = int(data.get("damage_n", 3))
@@ -280,15 +289,19 @@ def start_training_route():
             return jsonify({"success": False, "message": "Initialize Trainer first."}), 400
         if training_thread and training_thread.is_alive():
             return jsonify({"success": False, "message": "Training already running."}), 400
-        stop_training_event.clear() 
+        stop_training_event.clear()
+        if current_nca_trainer: # Resume timer when training starts
+            current_nca_trainer.resume_training_timer()
         training_thread = threading.Thread(target=training_loop_task_function, daemon=True)
         training_thread.start()
         tf.print("Training started via /start_training.")
     return jsonify({"success": True, "message": "Training started."})
 @app.route('/stop_training', methods=['POST'])
 def stop_training_route():
-    with train_thread_lock: 
-        ensure_trainer_stopped() 
+    with train_thread_lock:
+        ensure_trainer_stopped()
+        if current_nca_trainer: # Pause timer when training stops
+            current_nca_trainer.pause_training_timer()
     tf.print("Training stopped via /stop_training. Trainer instance preserved for saving.")
     return jsonify({"success": True, "message": "Training stopped. Trainer state preserved for saving."})
 
@@ -345,61 +358,266 @@ def get_live_trainer_preview_route():
                                       default_width_px=default_w, default_height_px=default_h)
 
 # ... (save_trainer_model - same)
-@app.route('/save_trainer_model', methods=['POST']) 
+@app.route('/save_trainer_model', methods=['POST'])
 def save_trainer_model_route():
-    ca_model_to_save = None; filename_base = "nca_model"
+    ca_model_to_save = None
+    model_save_base_name = "nca_model"
+    image_name_for_folder = "unknown_image"
+    experiment_type_for_folder = "generic"
+    
     with train_thread_lock:
         if current_nca_trainer and current_nca_trainer.ca:
             ca_model_to_save = current_nca_trainer.ca
-            exp_type = current_nca_trainer.config.get('experiment_type','generic')
-            filename_base = f"trained_{exp_type}_{current_nca_trainer.current_step}steps"
-        else: return jsonify({"success": False, "message": "No active NCA trainer instance to save."}), 400
+            experiment_type_for_folder = current_nca_trainer.config.get('experiment_type','generic')
+            
+            # Use the stored image name for the folder and model filename
+            if trainer_target_image_name != "unknown_image":
+                # Sanitize image name for use in path
+                image_name_for_folder = secure_filename(trainer_target_image_name).replace('.', '_')
+            
+            model_save_base_name = f"{image_name_for_folder}_{experiment_type_for_folder}_{int(time.time())}"
+        else:
+            return jsonify({"success": False, "message": "No active NCA trainer instance to save."}), 400
+    
     try:
-        default_filename = f"{filename_base}_{int(time.time())}.h5"
-        save_path = os.path.join(app.config['MODEL_FOLDER'], default_filename)
-        ca_model_to_save.save_weights(save_path)
-        tf.print(f"Trainer model saved to {save_path}")
-        return jsonify({"success": True, "message": f"Trainer model saved: {default_filename}."})
-    except Exception as e: tf.print(f"Error save_trainer_model: {e}\n{traceback.format_exc()}"); return jsonify({"success": False, "message": f"Error: {e}"}),500
+        # Create a new subdirectory for this model
+        model_subdir_path = os.path.join(app.config['MODEL_FOLDER'], model_save_base_name)
+        os.makedirs(model_subdir_path, exist_ok=True)
+        tf.print(f"Created model subdirectory: {model_subdir_path}")
+
+        # Model weights file
+        model_filename = f"{model_save_base_name}.weights.h5"
+        model_save_path = os.path.join(model_subdir_path, model_filename)
+        ca_model_to_save.save_weights(model_save_path)
+        tf.print(f"Trainer model weights saved to {model_save_path}")
+
+        # Metadata JSON file
+        json_filename = f"{model_save_base_name}.json"
+        json_save_path = os.path.join(model_subdir_path, json_filename)
+
+        metadata = {
+            "model_name": model_filename,
+            "trained_on_image": trainer_target_image_name, # Original name
+            "image_source_kind": trainer_target_image_loaded_or_drawn, # "loaded" or "drawn"
+            "training_steps": current_nca_trainer.current_step,
+            "experiment_type": experiment_type_for_folder,
+            "final_loss": float(current_nca_trainer.last_loss), # Convert float32 to Python float
+            "total_training_time_seconds": float(current_nca_trainer.get_status()["training_time_seconds"]), # Convert float32 to Python float
+            "save_timestamp": time.time(),
+            "save_datetime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        }
+        with open(json_save_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
+        tf.print(f"Metadata saved to {json_save_path}")
+
+        # If the image was drawn, save the final initialized image as a PNG
+        if trainer_target_image_loaded_or_drawn == "drawn" and trainer_target_image_rgba is not None:
+            drawn_image_filename = f"{image_name_for_folder}_initial_target.png"
+            drawn_image_save_path = os.path.join(model_subdir_path, drawn_image_filename)
+            
+            # Convert RGBA numpy array to PIL Image and save
+            # trainer_target_image_rgba is already (H, W, 4) float32 [0,1]
+            img_pil_to_save = PIL.Image.fromarray((trainer_target_image_rgba * 255).astype(np.uint8))
+            img_pil_to_save.save(drawn_image_save_path)
+            tf.print(f"Drawn initial target image saved to {drawn_image_save_path}")
+            metadata["initial_target_image_file"] = drawn_image_filename # Add to metadata
+            # Re-save metadata with the new image file entry
+            with open(json_save_path, 'w') as f:
+                json.dump(metadata, f, indent=4)
+            tf.print(f"Metadata updated with initial target image path: {json_save_path}")
+
+
+        return jsonify({"success": True, "message": f"Trainer model saved to '{model_save_base_name}' directory."})
+    except Exception as e:
+        tf.print(f"Error save_trainer_model: {e}\n{traceback.format_exc()}")
+        return jsonify({"success": False, "message": f"Error: {e}"}), 500
+
+
+@app.route('/load_trainer_model', methods=['POST'])
+def load_trainer_model_route():
+    global current_nca_trainer, trainer_target_image_rgba, trainer_target_source_kind, trainer_actual_target_shape, trainer_target_image_name, trainer_target_image_loaded_or_drawn
+    with train_thread_lock:
+        ensure_trainer_stopped() # Stop any active training before loading
+        current_nca_trainer = None # Clear existing trainer
+
+        if 'model_file' not in request.files or request.files['model_file'].filename == '':
+            return jsonify({"success": False, "message": "No model file provided."}), 400
+
+        file = request.files['model_file']
+        filename = secure_filename(file.filename)
+        if not filename.endswith(".weights.h5"): # Enforce the strict extension
+            return jsonify({"success": False, "message": "Invalid model file type. Must end with .weights.h5"}), 400
+
+        model_file_path = os.path.join(app.config['MODEL_FOLDER'], filename)
+        try:
+            file.save(model_file_path) # Save the uploaded model file
+
+            metadata = {}
+            json_file_path = model_file_path.replace('.weights.h5', '.json')
+            if os.path.exists(json_file_path):
+                with open(json_file_path, 'r') as f:
+                    metadata = json.load(f)
+                tf.print(f"Trainer: Loaded metadata from {json_file_path}")
+
+            # Try to load the original target image if specified in metadata
+            loaded_target_rgba = None
+            target_image_name_from_meta = metadata.get("trained_on_image")
+            image_source_kind_from_meta = metadata.get("image_source_kind", "unknown")
+            
+            if target_image_name_from_meta and target_image_name_from_meta != "unknown_image":
+                # Determine the path based on whether it was a loaded file or a drawn image
+                if image_source_kind_from_meta == "loaded":
+                    # For loaded files, they are in UPLOAD_FOLDER
+                    target_image_path = os.path.join(app.config['UPLOAD_FOLDER'], target_image_name_from_meta)
+                    if os.path.exists(target_image_path):
+                        with open(target_image_path, 'rb') as img_f:
+                            loaded_target_rgba = load_image_from_file(img_f, max_size=TARGET_SIZE)
+                        trainer_target_source_kind = "file"
+                        trainer_target_image_name = target_image_name_from_meta
+                        trainer_target_image_loaded_or_drawn = "loaded"
+                        tf.print(f"Trainer: Re-loaded target image '{target_image_name_from_meta}' for training.")
+                    else:
+                        tf.print(f"Trainer: Warning: Original loaded target image '{target_image_name_from_meta}' not found at {target_image_path}. Please set a new target.")
+                elif image_source_kind_from_meta == "drawn":
+                    # For drawn images, they are saved in the model's subdirectory
+                    # Need to infer the model's subdirectory from the loaded model file path
+                    model_dir_name = os.path.basename(os.path.dirname(model_file_path))
+                    drawn_image_filename_in_subdir = metadata.get("initial_target_image_file")
+                    if drawn_image_filename_in_subdir:
+                        drawn_image_path = os.path.join(app.config['MODEL_FOLDER'], model_dir_name, drawn_image_filename_in_subdir)
+                        if os.path.exists(drawn_image_path):
+                            with open(drawn_image_path, 'rb') as img_f:
+                                # For drawn images, they are already padded, so load as is
+                                img_pil = PIL.Image.open(img_f).convert("RGBA")
+                                loaded_target_rgba = np.float32(img_pil) / 255.0
+                                loaded_target_rgba[..., :3] *= loaded_target_rgba[..., 3:] # Apply alpha
+                            trainer_target_source_kind = "drawn_defines_padded_grid"
+                            trainer_target_image_name = target_image_name_from_meta
+                            trainer_target_image_loaded_or_drawn = "drawn"
+                            tf.print(f"Trainer: Re-loaded drawn target image '{target_image_name_from_meta}' from model subdir.")
+                        else:
+                            tf.print(f"Trainer: Warning: Original drawn target image '{drawn_image_filename_in_subdir}' not found at {drawn_image_path}. Please set a new target.")
+                    else:
+                        tf.print(f"Trainer: Warning: Metadata for drawn image '{target_image_name_from_meta}' missing 'initial_target_image_file'. Please set a new target.")
+                else:
+                    tf.print(f"Trainer: Unknown image source kind '{image_source_kind_from_meta}' in metadata. Please set a new target.")
+            else:
+                tf.print("Trainer: No original target image specified in metadata or it was 'unknown_image'. Please set a new target.")
+
+            if loaded_target_rgba is None:
+                return jsonify({"success": False, "message": "Could not load original target image. Please set a new target after loading model."}), 400
+
+            trainer_target_image_rgba = loaded_target_rgba # Set global target
+
+            # Initialize trainer with loaded weights and restored state
+            config = {
+                "fire_rate": float(metadata.get("fire_rate", DEFAULT_FIRE_RATE)), # Get from metadata or default
+                "batch_size": int(metadata.get("batch_size", DEFAULT_BATCH_SIZE)),
+                "pool_size": int(metadata.get("pool_size", DEFAULT_POOL_SIZE)),
+                "experiment_type": metadata.get("experiment_type", "Growing"),
+                "target_padding": TARGET_PADDING,
+                "learning_rate": float(metadata.get("learning_rate", 2e-3)),
+                "target_source_kind": trainer_target_source_kind,
+                "model_folder_path": app.config['MODEL_FOLDER']
+            }
+            if config["experiment_type"] == "Regenerating":
+                config["damage_n"] = int(metadata.get("damage_n", 3))
+            else:
+                config["damage_n"] = 0
+
+            current_nca_trainer = NCATrainer(target_img_rgba_processed=trainer_target_image_rgba, config=config)
+            current_nca_trainer.ca.load_weights(model_file_path) # Load weights into the new trainer's model
+
+            # Restore trainer state from metadata
+            current_nca_trainer.current_step = metadata.get("training_steps", 0)
+            current_nca_trainer.best_loss = metadata.get("final_loss", float('inf'))
+            current_nca_trainer.total_training_time_paused = metadata.get("total_training_time_seconds", 0.0)
+            current_nca_trainer.training_start_time = time.time() - current_nca_trainer.total_training_time_paused # Adjust start time for resume
+            current_nca_trainer.last_loss = metadata.get("final_loss", None) # Set last loss for status
+
+            trainer_actual_target_shape = current_nca_trainer.pad_target.shape
+            tf.print(f"NCATrainer loaded and state restored. Operational target shape: {trainer_actual_target_shape}")
+
+            model_summary_str = get_model_summary(current_nca_trainer.get_model())
+            return jsonify({
+                "success": True,
+                "message": f"Trainer model '{filename}' loaded. Training state restored.",
+                "model_summary": model_summary_str,
+                "initial_state_preview_url": "/get_live_trainer_preview"
+            })
+
+        except Exception as e:
+            tf.print(f"Error load_trainer_model: {e}\n{traceback.format_exc()}")
+            current_nca_trainer = None
+            return jsonify({"success": False, "message": f"Error loading trainer model: {str(e)}"}), 500
 
 
 # --- Runner Routes ---
 @app.route('/load_current_training_model_for_runner', methods=['POST'])
 def load_current_training_model_for_runner_route():
     global current_nca_runner, current_nca_trainer, trainer_actual_target_shape, runner_sleep_duration
-    
-    trainer_model_weights = None
-    trainer_fire_rate = DEFAULT_FIRE_RATE # Default if not found
-    # Grid dimensions for the runner should match the trainer's *operational* grid size
-    runner_h, runner_w = TARGET_SIZE + 2 * TARGET_PADDING, TARGET_SIZE + 2 * TARGET_PADDING # Default
 
-    with train_thread_lock: 
-        if not current_nca_trainer or not current_nca_trainer.ca:
-            return jsonify({"success": False, "message": "No active training model available."}), 400
-        try:
-            trainer_model_weights = current_nca_trainer.ca.get_weights()
-            trainer_fire_rate = current_nca_trainer.ca.fire_rate
-            if current_nca_trainer.pad_target is not None: # Use trainer's actual operational grid size
-                runner_h = current_nca_trainer.pad_target.shape[0]
-                runner_w = current_nca_trainer.pad_target.shape[1]
-            elif trainer_actual_target_shape: # Fallback to stored shape
-                runner_h, runner_w = trainer_actual_target_shape[0], trainer_actual_target_shape[1]
+    best_model_file_path = os.path.join(app.config['MODEL_FOLDER'], "best_trainer_model.h5")
 
-        except Exception as e:
-            tf.print(f"Error getting weights/info from trainer model: {e}\n{traceback.format_exc()}")
-            return jsonify({"success": False, "message": f"Error accessing trainer model: {str(e)}"}), 500
+    runner_h, runner_w = TARGET_SIZE + 2 * TARGET_PADDING, TARGET_SIZE + 2 * TARGET_PADDING # Default grid size for runner
+    model_to_load = None
+    model_fire_rate = DEFAULT_FIRE_RATE
+    message = "Runner: "
+
+    with train_thread_lock: # Acquire lock to safely access trainer state
+        # Try to load the best model first
+        if os.path.exists(best_model_file_path):
+            try:
+                temp_ca_model = CAModel(channel_n=CHANNEL_N, fire_rate=DEFAULT_FIRE_RATE) # Fire rate will be updated
+                temp_ca_model.load_weights(best_model_file_path)
+                model_to_load = temp_ca_model
+                message += "Loaded best performing model from disk."
+                tf.print(f"Runner: Loaded best model from {best_model_file_path}")
+                
+                # If trainer is active, use its fire rate and grid size for consistency
+                if current_nca_trainer and current_nca_trainer.ca:
+                    model_fire_rate = current_nca_trainer.ca.fire_rate
+                    if current_nca_trainer.pad_target is not None:
+                        runner_h = current_nca_trainer.pad_target.shape[0]
+                        runner_w = current_nca_trainer.pad_target.shape[1]
+                    elif trainer_actual_target_shape:
+                        runner_h, runner_w = trainer_actual_target_shape[0], trainer_actual_target_shape[1]
+                    model_to_load.fire_rate = model_fire_rate # Update fire rate of the loaded model
+                    message += f" (Fire rate from trainer: {model_fire_rate})"
+                else:
+                    message += f" (Default fire rate: {DEFAULT_FIRE_RATE})"
+
+            except Exception as e:
+                tf.print(f"Error loading best model from disk: {e}\n{traceback.format_exc()}")
+                model_to_load = None # Fallback to current trainer if best model load fails
+                message += f"Failed to load best model ({str(e)}). "
+
+        # If best model not loaded or failed, try current training model
+        if model_to_load is None:
+            if current_nca_trainer and current_nca_trainer.ca:
+                try:
+                    model_to_load = CAModel(channel_n=CHANNEL_N, fire_rate=current_nca_trainer.ca.fire_rate)
+                    model_to_load.set_weights(current_nca_trainer.ca.get_weights())
+                    model_fire_rate = current_nca_trainer.ca.fire_rate
+                    if current_nca_trainer.pad_target is not None:
+                        runner_h = current_nca_trainer.pad_target.shape[0]
+                        runner_w = current_nca_trainer.pad_target.shape[1]
+                    elif trainer_actual_target_shape:
+                        runner_h, runner_w = trainer_actual_target_shape[0], trainer_actual_target_shape[1]
+                    message += "Loaded current training model."
+                    tf.print(f"Runner: Loaded current training model. Fire rate: {model_fire_rate}.")
+                except Exception as e:
+                    tf.print(f"Error getting weights/info from trainer model: {e}\n{traceback.format_exc()}")
+                    return jsonify({"success": False, "message": f"Error accessing trainer model: {str(e)}"}), 500
+            else:
+                return jsonify({"success": False, "message": "No active training model or best model available."}), 400
 
     with run_thread_lock:
         ensure_runner_stopped()
-        current_nca_runner = None 
-        message = "Runner: Loaded current training model."
+        current_nca_runner = None
         try:
-            runner_ca_model = CAModel(channel_n=CHANNEL_N, fire_rate=trainer_fire_rate)
-            runner_ca_model.set_weights(trainer_model_weights)
-            tf.print(f"Runner: Weights from trainer set. Fire rate: {trainer_fire_rate}.")
-            
             initial_runner_shape = (runner_h, runner_w, CHANNEL_N) # Use determined H, W
-            current_nca_runner = NCARunner(ca_model_instance=runner_ca_model, 
+            current_nca_runner = NCARunner(ca_model_instance=model_to_load,
                                            initial_state_shape_tuple=initial_runner_shape)
             runner_sleep_duration = DEFAULT_RUNNER_SLEEP_DURATION
 
@@ -423,35 +641,54 @@ def load_model_for_runner_route():
         model_file_path = None; message = ""
         if 'model_file' in request.files and request.files['model_file'].filename != '':
             file = request.files['model_file']; filename = secure_filename(file.filename)
-            if filename.endswith(".h5"):
+            if filename.endswith(".weights.h5"): # Enforce .weights.h5 for runner loading too
                 model_file_path = os.path.join(app.config['MODEL_FOLDER'], filename); file.save(model_file_path)
                 message = f"Runner: Uploaded model '{filename}' loaded."
-            else: return jsonify({"success": False, "message": "Invalid model file type (.h5 required)."}), 400
-        else: 
-            h5_files = [f for f in os.listdir(app.config['MODEL_FOLDER']) if f.endswith('.h5')]
-            if not h5_files: return jsonify({"success": False, "message": "No .h5 models in 'models' folder."}), 404
+            else: return jsonify({"success": False, "message": "Invalid model file type (.weights.h5 required)."}), 400
+        else:
+            # Filter for .weights.h5 files
+            h5_files = [f for f in os.listdir(app.config['MODEL_FOLDER']) if f.endswith('.weights.h5')] # Modified
+            if not h5_files: return jsonify({"success": False, "message": "No .weights.h5 models in 'models' folder."}), 404 # Modified
             h5_files.sort(key=lambda f: os.path.getmtime(os.path.join(app.config['MODEL_FOLDER'], f)), reverse=True)
             model_file_path = os.path.join(app.config['MODEL_FOLDER'], h5_files[0])
             message = f"Runner: Loaded latest model '{h5_files[0]}' from server."
         try:
-            loaded_ca_model_for_runner = CAModel(channel_n=CHANNEL_N, fire_rate=DEFAULT_FIRE_RATE) 
+            loaded_ca_model_for_runner = CAModel(channel_n=CHANNEL_N, fire_rate=DEFAULT_FIRE_RATE)
             loaded_ca_model_for_runner.load_weights(model_file_path)
             tf.print(f"Runner: Weights loaded from {model_file_path}")
-            
+
+            # Load companion metadata for display
+            metadata = {}
+            json_file_path = model_file_path.replace('.weights.h5', '.json')
+            if os.path.exists(json_file_path):
+                with open(json_file_path, 'r') as f:
+                    metadata = json.load(f)
+                tf.print(f"Runner: Loaded metadata from {json_file_path}")
+
             initial_runner_h, initial_runner_w = TARGET_SIZE + 2 * TARGET_PADDING, TARGET_SIZE + 2 * TARGET_PADDING
             # Use trainer_actual_target_shape if trainer has been initialized, as it reflects the true grid size trainer used
-            if trainer_actual_target_shape: 
+            if trainer_actual_target_shape:
                 initial_runner_h, initial_runner_w = trainer_actual_target_shape[0], trainer_actual_target_shape[1]
                 message += f" Grid based on last trainer's grid size ({initial_runner_h}x{initial_runner_w})."
             else: message += f" Grid based on default ({initial_runner_h}x{initial_runner_w})."
-            
+
             initial_runner_shape_to_use = (initial_runner_h, initial_runner_w, CHANNEL_N)
-            current_nca_runner = NCARunner(ca_model_instance=loaded_ca_model_for_runner, 
+            current_nca_runner = NCARunner(ca_model_instance=loaded_ca_model_for_runner,
                                            initial_state_shape_tuple=initial_runner_shape_to_use)
             runner_sleep_duration = DEFAULT_RUNNER_SLEEP_DURATION
-            model_summary_str = get_model_summary(current_nca_runner.ca) 
-            return jsonify({"success": True, "message": message, "model_summary": model_summary_str, "runner_preview_url": "/get_live_runner_preview" })
-        except Exception as e: tf.print(f"Error load_model_for_runner: {e}\n{traceback.format_exc()}"); current_nca_runner=None; return jsonify({"success":False,"message":f"Error: {e}"}),500
+            model_summary_str = get_model_summary(current_nca_runner.ca)
+
+            # Include metadata in the response for frontend display
+            response_data = {
+                "success": True, "message": message, "model_summary": model_summary_str,
+                "runner_preview_url": "/get_live_runner_preview",
+                "metadata": metadata # Include metadata here
+            }
+            return jsonify(response_data)
+        except Exception as e:
+            tf.print(f"Error load_model_for_runner: {e}\n{traceback.format_exc()}")
+            current_nca_runner=None
+            return jsonify({"success":False,"message":f"Error: {e}"}),500
 
 # ... (running_loop_task_function, start_running, stop_running, set_runner_speed, 
 #      get_runner_status, get_live_runner_preview, runner_action routes - same as previous correct version)

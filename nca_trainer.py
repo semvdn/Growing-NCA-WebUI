@@ -1,11 +1,12 @@
 # nca_trainer.py
 """NCA Training Logic."""
 
+import os # Added for path operations
 import tensorflow as tf
 import numpy as np
 import time
 from nca_model import CAModel
-from nca_utils import SamplePool, make_circle_masks 
+from nca_utils import SamplePool, make_circle_masks
 from nca_globals import CHANNEL_N, TARGET_PADDING # TARGET_PADDING needed for file-based padding
 
 class NCATrainer:
@@ -14,6 +15,10 @@ class NCATrainer:
         self.ca = CAModel(channel_n=CHANNEL_N, fire_rate=config['fire_rate'])
         
         target_source_kind = config.get('target_source_kind', 'file') # Default to file if not specified
+
+        self.best_loss = float('inf') # Initialize best loss tracking
+        self.best_model_save_path = os.path.join(config['model_folder_path'], "best_trainer_model.h5")
+        tf.print(f"NCATrainer: Best model will be saved to {self.best_model_save_path}")
 
         if target_source_kind == "drawn_defines_padded_grid":
             # For drawn patterns, target_img_rgba_processed is already the final padded size
@@ -30,8 +35,12 @@ class NCATrainer:
         self.loss_log = []
         self.current_step = 0
         self.training_start_time = None
-        self.last_preview_state = None 
+        self.last_preview_state = None
         self.last_loss = None
+        self.total_training_time_paused = 0.0 # New: Accumulates time spent paused
+        self.last_pause_time = None # New: Timestamp when training was last paused
+        self.total_training_time_paused = 0.0 # New: Accumulates time spent paused
+        self.last_pause_time = None # New: Timestamp when training was last paused
 
         lr = self.config.get('learning_rate', 2e-3)
         lr_sched = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
@@ -113,22 +122,62 @@ class NCATrainer:
         self.current_step += 1
         self.last_loss = loss_tf.numpy()
         self.loss_log.append(self.last_loss)
-        self.last_preview_state = x_updated_batch_tf[0].numpy().copy() 
+        self.last_preview_state = x_updated_batch_tf[0].numpy().copy()
         
+        self._save_best_model_if_improved() # Call the new method here
+
         return self.last_preview_state, self.last_loss
+
+    def _save_best_model_if_improved(self):
+        if self.last_loss is None or self.current_step == 0:
+            return
+
+        # Check every 100 steps
+        if self.current_step % 100 == 0:
+            if self.last_loss < self.best_loss:
+                tf.print(f"NCATrainer: New best loss found at step {self.current_step}: {self.last_loss:.4f} (previous best: {self.best_loss:.4f}). Saving model.")
+                self.best_loss = self.last_loss
+                try:
+                    self.ca.save_weights(self.best_model_save_path)
+                    tf.print(f"NCATrainer: Best model weights saved to {self.best_model_save_path}")
+                except Exception as e:
+                    tf.print(f"NCATrainer: Error saving best model weights: {e}")
+            # else:
+                # tf.print(f"NCATrainer: Current loss {self.last_loss:.4f} not better than best {self.best_loss:.4f} at step {self.current_step}.")
+
+    def pause_training_timer(self):
+        """Pauses the training timer, accumulating elapsed time."""
+        if self.training_start_time and self.last_pause_time is None:
+            self.last_pause_time = time.time()
+            tf.print(f"NCATrainer: Training timer paused at step {self.current_step}.")
+
+    def resume_training_timer(self):
+        """Resumes the training timer, accounting for paused time."""
+        if self.training_start_time and self.last_pause_time is not None:
+            self.total_training_time_paused += (time.time() - self.last_pause_time)
+            self.last_pause_time = None
+            tf.print(f"NCATrainer: Training timer resumed. Total paused time: {self.total_training_time_paused:.2f}s")
+        elif self.training_start_time is None: # First start
+            self.training_start_time = time.time()
+            tf.print("NCATrainer: Training timer started for the first time.")
 
     def get_status(self):
         elapsed_time_val = 0
         if self.training_start_time:
-            elapsed_time_val = time.time() - self.training_start_time
-        
+            current_active_time = time.time()
+            if self.last_pause_time is not None: # If currently paused, use the pause time as the "current" time
+                current_active_time = self.last_pause_time
+            elapsed_time_val = (current_active_time - self.training_start_time) - self.total_training_time_paused
+            if elapsed_time_val < 0: # Prevent negative time if clock skews or very short intervals
+                elapsed_time_val = 0
+
         current_loss_val = self.last_loss if self.last_loss is not None else 0.0
         log_loss_val_str = "N/A"
-        if current_loss_val > 1e-9: 
+        if current_loss_val > 1e-9:
             try:
                 log_loss_val_str = f"{np.log10(current_loss_val):.3f}"
-            except Exception: 
-                pass 
+            except Exception:
+                pass
 
         return {
             "step": self.current_step,
