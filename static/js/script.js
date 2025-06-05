@@ -20,6 +20,7 @@ let trainerCtx = null;
 let isDrawingOnTrainerCanvas = false;
 let trainerCanvasHistory = [];
 let trainerCanvasHistoryPointer = -1;
+let isEraserModeTrain = false; // New state variable for eraser mode
 
 // --- Runner Canvas & Interaction ---
 const previewCanvasRunEl = document.getElementById('previewCanvasRun'); // NEW
@@ -282,11 +283,12 @@ function updateTrainerControlsAvailability() {
     confirmDrawingBtnTrain.disabled = trainingLoopActive;
     loadImageFileBtnTrain.disabled = trainingLoopActive;
     clearTrainCanvasBtn.disabled = trainingLoopActive;
-    trainDrawColorPicker.disabled = trainingLoopActive;
+    trainDrawColorPicker.disabled = trainingLoopActive || isEraserModeTrain; // Disable color picker in eraser mode
     trainBrushSizeSlider.disabled = trainingLoopActive;
     trainBrushOpacitySlider.disabled = trainingLoopActive;
     undoTrainCanvasBtn.disabled = trainingLoopActive || trainerCanvasHistoryPointer <= 0;
     redoTrainCanvasBtn.disabled = trainingLoopActive || trainerCanvasHistoryPointer >= trainerCanvasHistory.length - 1;
+    document.getElementById('trainEraserModeCheckbox').disabled = trainingLoopActive; // Disable eraser checkbox during training
     
     initTrainerBtn.disabled = !trainerTargetConfirmed || trainingLoopActive;
     startTrainingBtn.disabled = !trainerInitialized || trainingLoopActive;
@@ -406,15 +408,21 @@ function drawOnTrainerCanvas(event, isDragging) {
     const brushOpacity = parseInt(trainBrushOpacitySlider.value) / 100;
     const color = trainDrawColorPicker.value;
 
-    // Apply opacity to the color
-    const hexToRgb = (hex) => {
-        const bigint = parseInt(hex.slice(1), 16);
-        const r = (bigint >> 16) & 255;
-        const g = (bigint >> 8) & 255;
-        const b = bigint & 255;
-        return `${r},${g},${b}`;
-    };
-    trainerCtx.fillStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`;
+    // Apply opacity to the color or use clear for eraser mode
+    if (isEraserModeTrain) {
+        trainerCtx.globalCompositeOperation = 'destination-out'; // This makes new drawings transparent
+        trainerCtx.fillStyle = `rgba(0,0,0, ${brushOpacity})`; // Color doesn't matter, only alpha
+    } else {
+        trainerCtx.globalCompositeOperation = 'source-over'; // Default drawing mode
+        const hexToRgb = (hex) => {
+            const bigint = parseInt(hex.slice(1), 16);
+            const r = (bigint >> 16) & 255;
+            const g = (bigint >> 8) & 255;
+            const b = bigint & 255;
+            return `${r},${g},${b}`;
+        };
+        trainerCtx.fillStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`;
+    }
     
     trainerCtx.beginPath();
     trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2);
@@ -1015,6 +1023,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     trainBrushOpacitySlider.addEventListener('input', () => {
         trainBrushOpacityValue.textContent = trainBrushOpacitySlider.value + '%';
+    });
+
+    const trainEraserModeCheckbox = document.getElementById('trainEraserModeCheckbox');
+    trainEraserModeCheckbox.addEventListener('change', () => {
+        isEraserModeTrain = trainEraserModeCheckbox.checked;
+        // Optionally, change cursor or provide visual feedback
+        trainerDrawCanvasEl.style.cursor = isEraserModeTrain ? 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><path fill=\'black\' d=\'M5.414 20.586L19.556 6.444l-1.414-1.414L4 19.172zM4 20a1 1 0 001.414.086L20.586 4.914A1 1 0 0020 4H5a1 1 0 00-1 1v15z\'/><rect x=\'3\' y=\'18\' width=\'18\' height=\'3\' fill=\'grey\'/></svg>") 12 12, auto' : 'crosshair';
     });
 
     experimentTypeSelectTrain.addEventListener('change', () => {
