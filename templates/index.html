@@ -38,7 +38,7 @@
         #trainerDrawCanvas, #previewCanvasRun { 
             border: 1px solid #adb5bd; background-color: #f8f9fa; 
             max-width: 100%; height: auto; image-rendering: pixelated; 
-            width: 256px; height: 256px; /* Consistent fixed size */
+            width: 512px; height: 512px; /* Consistent fixed size */
             display: inline-block; /* Allow centering */
         }
         #previewCanvasRun.erase-mode { cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path fill='black' d='M5.414 20.586L19.556 6.444l-1.414-1.414L4 19.172zM4 20a1 1 0 001.414.086L20.586 4.914A1 1 0 0020 4H5a1 1 0 00-1 1v15z'/><rect x='3' y='18' width='18' height='3' fill='grey'/></svg>") 12 12, auto; }
@@ -188,22 +188,16 @@
                     </div>
                 </fieldset>
 
-                <div class="status-box" id="trainingStatus">Status: Define a target pattern above.</div>
-                <div id="trainingModelInfo">
-                    <h4>Trainer Model Parameters:</h4>
-                    <pre id="trainModelParamsText">N/A</pre>
-                </div>
+                <fieldset class="collapsible-fieldset">
+                    <legend class="collapsible-header">4. Capture Tools</legend>
+                    <div class="collapsible-content capture-tools-container">
+                        <button id="takeScreenshotTrainBtn">Take Screenshot</button>
+                        <button id="startRecordingTrainBtn">Start Recording</button>
+                        <button id="stopRecordingTrainBtn" disabled>Stop Recording</button>
+                        <span id="recordingTimerTrain" class="recording-timer">00:00</span>
+                    </div>
+                </fieldset>
             </div>
-
-            <fieldset class="collapsible-fieldset">
-                <legend class="collapsible-header">4. Capture Tools</legend>
-                <div class="collapsible-content capture-tools-container">
-                    <button id="takeScreenshotTrainBtn">Take Screenshot</button>
-                    <button id="startRecordingTrainBtn">Start Recording</button>
-                    <button id="stopRecordingTrainBtn" disabled>Stop Recording</button>
-                    <span id="recordingTimerTrain" class="recording-timer">00:00</span>
-                </div>
-            </fieldset>
 
             <!-- Run Tab Content -->
             <div id="RunTab" class="tab-content">
@@ -250,11 +244,6 @@
                     </div>
                 </fieldset>
 
-                <div class="status-box" id="runStatus">Status: Load a model to start.</div>
-                 <div id="runModelInfo">
-                    <h4>Runner Model Info:</h4>
-                    <pre id="runModelParamsText">N/A</pre>
-                </div>
 
                 <fieldset class="collapsible-fieldset">
                     <legend class="collapsible-header">4. Capture Tools</legend>
@@ -275,7 +264,12 @@
                 <!-- This will be replaced by a canvas for drawing, or show an img for uploaded target / training progress -->
                 <div class="canvas-container">
                     <canvas id="trainerDrawCanvas" width="256" height="256"></canvas> <!-- Fixed size, matching DRAW_CANVAS_DISPLAY_SIZE -->
-                    <img id="trainerProgressImg" src="" alt="Training Progress" style="display:none; width: 256px; height: 256px; border: 1px solid #adb5bd; background-color: #f8f9fa;">
+                    <img id="trainerProgressImg" src="" alt="Training Progress" style="display:none; width: 512px; height: 512px; border: 1px solid #adb5bd; background-color: #f8f9fa;">
+                </div>
+                <div class="status-box" id="trainingStatus">Status: Define a target pattern above.</div>
+                <div id="trainingModelInfo">
+                    <h4>Trainer Model Parameters:</h4>
+                    <pre id="trainModelParamsText">N/A</pre>
                 </div>
             </div>
              <div id="RunPreviewArea" class="preview-area" style="display:none;">
@@ -283,6 +277,11 @@
                  <div class="canvas-container">
                     <img id="previewCanvasRun" src="" alt="Run Preview Area"> <!-- Fixed size via CSS for #previewCanvasRun -->
                 </div>
+               <div class="status-box" id="runStatus">Status: Load a model to start.</div>
+                <div id="runModelInfo">
+                   <h4>Runner Model Info:</h4>
+                   <pre id="runModelParamsText">N/A</pre>
+               </div>
             </div>
         </div>
     </div>

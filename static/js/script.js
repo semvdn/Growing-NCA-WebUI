@@ -100,8 +100,8 @@ let ffmpeg = null;
 let ffmpegLoaded = false;
 
 // --- Constants ---
-const DRAW_CANVAS_WIDTH = 256;
-const DRAW_CANVAS_HEIGHT = 256;
+const DRAW_CANVAS_WIDTH = 512;
+const DRAW_CANVAS_HEIGHT = 512;
 
 // --- FFmpeg.wasm Integration ---
 async function loadFFmpeg() {
@@ -1005,7 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const placeholderDim = DRAW_CANVAS_WIDTH;
     const placeholderColor = '#f0f0f0';
-    const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`;
+    const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='32' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`;
     
     trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress');
     previewCanvasRunImgEl.src = svgPlaceholder('Runner Preview');
