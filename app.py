@@ -759,16 +759,27 @@ def set_runner_speed_route():
 def get_runner_status_route():
     is_loop_active_now = running_thread.is_alive() if running_thread else False
     hist_idx, total_hist_len = 0,0
-    if current_nca_runner: 
-        with current_nca_runner._state_lock: 
+    actual_fps_val = 0.0 # New: For actual FPS
+
+    if current_nca_runner:
+        with current_nca_runner._state_lock: # Access runner attributes safely
             hist_idx = current_nca_runner.history_index
             total_hist_len = len(current_nca_runner.history)
+            actual_fps_val = current_nca_runner.actual_fps # Get actual_fps
+
     max_hist_step = max(0, total_hist_len -1 if total_hist_len > 0 else 0)
     status_msg = f"Runner Loop: {'Active' if is_loop_active_now else 'Paused/Stopped'}. Step: {hist_idx}/{max_hist_step}"
     if not current_nca_runner: status_msg = "Runner: No model loaded"
-    return jsonify({"is_loop_active":is_loop_active_now, "preview_url":"/get_live_runner_preview", "history_step":hist_idx,
-                    "total_history":total_hist_len, "status_message":status_msg, 
-                    "current_fps":1.0/runner_sleep_duration if runner_sleep_duration > 0 else "Max"})
+
+    return jsonify({
+        "is_loop_active":is_loop_active_now,
+        "preview_url":"/get_live_runner_preview", # This will be changed in Phase 2
+        "history_step":hist_idx,
+        "total_history":total_hist_len,
+        "status_message":status_msg,
+        "current_fps":1.0/runner_sleep_duration if runner_sleep_duration > 0 else "Max", # Target FPS
+        "actual_fps": f"{actual_fps_val:.1f}" # New: Actual FPS
+    })
 @app.route('/get_live_runner_preview') 
 def get_live_runner_preview_route():
     preview_state_to_show = None
@@ -780,11 +791,56 @@ def get_live_runner_preview_route():
         if preview_state_to_show is not None: 
             state_h = preview_state_to_show.shape[0] # Runner's actual state height
             if state_h > 0: zoom = DRAW_CANVAS_DISPLAY_SIZE // state_h
-    return get_preview_image_response(preview_state_to_show, zoom_factor=max(1, zoom), default_width_px=default_w, default_height_px=default_h)
+@app.route('/get_live_runner_raw_preview_data')
+def get_live_runner_raw_preview_data_route():
+    preview_state_to_show = None
+    grid_h, grid_w = 0, 0
+
+    if current_nca_runner:
+        # Make sure to acquire the lock if get_current_state_for_display doesn't internally
+        # current_nca_runner.get_current_state_for_display() already uses a lock
+        preview_state_to_show = current_nca_runner.get_current_state_for_display()
+        if preview_state_to_show is not None:
+            grid_h, grid_w = preview_state_to_show.shape[0], preview_state_to_show.shape[1]
+
+    if preview_state_to_show is None:
+        return jsonify({"success": False, "message": "No runner state available", "height": 0, "width": 0, "pixels": []})
+
+    # Assuming preview_state_to_show is [H, W, CHANNEL_N] (float32, 0.0-1.0)
+    # and channels 0,1,2,3 are R,G,B,A for display
+    if preview_state_to_show.shape[-1] < 4:
+        # Should not happen if CHANNEL_N is sufficient and state is structured for RGBA output
+        return jsonify({"success": False, "message": "Insufficient channels in state for RGBA", "height": grid_h, "width": grid_w, "pixels": []})
+
+    rgba_data = preview_state_to_show[..., :4]  # Extract RGBA channels
+
+    # Ensure alpha is applied if your rendering expects pre-multiplied alpha,
+    # or if your RGB values are independent of alpha and you want standard alpha blending.
+    # For direct ImageData, non-premultiplied is standard.
+    # rgb_channels = rgba_data[..., :3]
+    # alpha_channel = np.clip(rgba_data[..., 3:4], 0, 1)
+    # display_rgb = rgb_channels # If not premultiplying: display_rgb = rgb_channels * alpha_channel + (1.0 - alpha_channel) * background_color
+    # display_rgba = np.concatenate((display_rgb, alpha_channel), axis=-1)
+    
+    # For direct RGBA values (0-1) into Uint8ClampedArray (0-255)
+    display_rgba_uint8 = np.uint8(np.clip(rgba_data, 0, 1) * 255)
+    
+    pixel_list = display_rgba_uint8.flatten().tolist()
+
+    return jsonify({
+        "success": True,
+        "height": grid_h,
+        "width": grid_w,
+        "pixels": pixel_list
+    })
+
+# The old /get_live_runner_preview route can remain as is, or be deprecated later.
+# For now, it's not actively used by the optimized runner.
+
 @app.route('/runner_action', methods=['POST'])
 def runner_action_route():
     response_msg="Action processed."; action_success=True; json_response_data={}
-    with run_thread_lock: 
+    with run_thread_lock:
         if not current_nca_runner: return jsonify({"success":False,"message":"Runner not active."}),400
         data=request.json; action_type=data.get('action')
         if action_type == 'rewind': _,idx=current_nca_runner.rewind();response_msg=f"Rewound to step {idx}."

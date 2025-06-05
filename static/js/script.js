@@ -22,7 +22,14 @@ let trainerCanvasHistory = [];
 let trainerCanvasHistoryPointer = -1;
 
 // --- Runner Canvas & Interaction ---
-const previewCanvasRunImgEl = document.getElementById('previewCanvasRun');
+const previewCanvasRunEl = document.getElementById('previewCanvasRun'); // NEW
+let previewCanvasRunCtx = null;
+if (previewCanvasRunEl) {
+    previewCanvasRunCtx = previewCanvasRunEl.getContext('2d');
+    // For image-rendering: pixelated to work well when scaling,
+    // ensure the context's image smoothing is off.
+    previewCanvasRunCtx.imageSmoothingEnabled = false;
+}
 
 // --- DOM Elements (Trainer) ---
 const imageFileInputTrain = document.getElementById('imageFileInputTrain');
@@ -314,11 +321,11 @@ function updateRunnerControlsAvailability() {
     runFpsSlider.disabled = !runnerModelLoaded;
 
     if (runnerModelLoaded) {
-        previewCanvasRunImgEl.classList.toggle('erase-mode', currentRunToolMode === 'erase');
-        previewCanvasRunImgEl.classList.toggle('draw-mode', currentRunToolMode === 'draw');
+        previewCanvasRunEl.classList.toggle('erase-mode', currentRunToolMode === 'erase');
+        previewCanvasRunEl.classList.toggle('draw-mode', currentRunToolMode === 'draw');
     } else {
-        previewCanvasRunImgEl.className = '';
-        previewCanvasRunImgEl.style.cursor = 'default';
+        previewCanvasRunEl.className = '';
+        previewCanvasRunEl.style.cursor = 'default';
     }
 
     // Capture Tools
@@ -752,7 +759,6 @@ loadCurrentTrainingModelBtnRun.addEventListener('click', async () => {
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         runModelParamsText.textContent = response.model_summary || 'N/A';
-        previewCanvasRunImgEl.src = `${response.runner_preview_url}?t=${new Date().getTime()}`;
         runnerModelLoaded = true;
         runnerLoopActive = false; 
         if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); 
@@ -781,7 +787,6 @@ loadModelBtnRun.addEventListener('click', async () => {
             modelInfoText += `Saved: ${response.metadata.save_datetime || 'N/A'}\n`;
         }
         runModelParamsText.textContent = modelInfoText; // Updated to display metadata
-        previewCanvasRunImgEl.src = `${response.runner_preview_url}?t=${new Date().getTime()}`;
         runnerModelLoaded = true;
         runnerLoopActive = false;
         if (runningStatusIntervalId) clearInterval(runningStatusIntervalId);
@@ -832,8 +837,7 @@ async function handleRunnerAction(action, params = {}) {
     const payload = { action, ...params };
     const response = await postRequest('/runner_action', payload);
     if(response.success && response.preview_url) {
-        previewCanvasRunImgEl.src = `${response.preview_url}?t=${new Date().getTime()}`; 
-        const currentFPS = parseFloat(runFpsSlider.value).toFixed(1); 
+        const currentFPS = parseFloat(runFpsSlider.value).toFixed(1);
         runStatusDiv.textContent = `${response.message} (Target: ${currentFPS} FPS)`;
          if (action !== 'modify_area') { /* showGlobalStatus for non-drag actions */ }
     } else if (!response.success) { showGlobalStatus(response.message, false); }
@@ -842,7 +846,7 @@ async function handleRunnerAction(action, params = {}) {
 }
 function performCanvasAction(event, isDrag = false) {
     if (!runnerModelLoaded || currentOpenTab !== 'RunTab' ) return; 
-    const rect = previewCanvasRunImgEl.getBoundingClientRect();
+    const rect = previewCanvasRunEl.getBoundingClientRect(); // Use canvas element
     if (rect.width === 0 || rect.height === 0) return; 
     const x = event.clientX - rect.left; const y = event.clientY - rect.top;
     if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
@@ -859,14 +863,14 @@ function performCanvasAction(event, isDrag = false) {
         canvas_render_width: rect.width, canvas_render_height: rect.height
     });
 }
-previewCanvasRunImgEl.addEventListener('mousedown', (event) => {
+previewCanvasRunEl.addEventListener('mousedown', (event) => { // Changed to previewCanvasRunEl
     if (event.button !== 0) return; 
     if (!runnerModelLoaded || currentOpenTab !== 'RunTab') return;
     isInteractingWithRunCanvas = true;
     performCanvasAction(event); 
     event.preventDefault(); 
 });
-previewCanvasRunImgEl.addEventListener('mousemove', (event) => {
+previewCanvasRunEl.addEventListener('mousemove', (event) => { // Changed to previewCanvasRunEl
     if (!isInteractingWithRunCanvas) return; 
     performCanvasAction(event, true); 
     event.preventDefault();
@@ -877,7 +881,7 @@ document.addEventListener('mouseup', (event) => {
         isInteractingWithRunCanvas = false;
     }
 });
-previewCanvasRunImgEl.addEventListener('mouseleave', () => {
+previewCanvasRunEl.addEventListener('mouseleave', () => { // Changed to previewCanvasRunEl
     if (isInteractingWithRunCanvas) {
         isInteractingWithRunCanvas = false;
     }
@@ -885,35 +889,45 @@ previewCanvasRunImgEl.addEventListener('mouseleave', () => {
 
 async function fetchRunnerStatus() {
     if (currentOpenTab !== 'RunTab' && runningStatusIntervalId) { return; }
-    if (!runnerModelLoaded && runningStatusIntervalId) { 
+    if (!runnerModelLoaded && runningStatusIntervalId) {
         clearInterval(runningStatusIntervalId); runningStatusIntervalId = null;
         runStatusDiv.textContent = "Status: Runner: No model loaded.";
+        if (previewCanvasRunCtx) { // Clear canvas if no model
+            previewCanvasRunCtx.clearRect(0, 0, previewCanvasRunEl.width, previewCanvasRunEl.height);
+            // Optionally draw a placeholder here too
+        }
         updateRunnerControlsAvailability(); return;
     }
     try {
         const response = await fetch('/get_runner_status');
-        if (!response.ok) { 
+        if (!response.ok) {
             runStatusDiv.textContent = `Runner status error: ${response.status}`;
             runnerLoopActive = false; updateRunnerControlsAvailability(); return;
         }
         const data = await response.json();
-        const serverTargetFPS = data.current_fps === "Max" ? "Max" : parseFloat(data.current_fps).toFixed(1);
-        runStatusDiv.textContent = `${data.status_message || 'Status unavailable'} (Target: ${serverTargetFPS} FPS)`;
         
-        if (!isInteractingWithRunCanvas || data.is_loop_active) {
-            if (data.preview_url) previewCanvasRunImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
-        }
-        const prevRunnerLoopActive = runnerLoopActive; // Capture previous state
+        const targetFPSDisplay = data.current_fps === "Max" ? "Max" : parseFloat(data.current_fps).toFixed(1);
+        const actualFPSDisplay = data.actual_fps || "N/A"; // Get actual_fps from data
+        runStatusDiv.textContent = `${data.status_message || 'Status unavailable'} (Target: ${targetFPSDisplay} FPS, Actual: ${actualFPSDisplay} FPS)`;
+
+        // Preview update logic will be changed in Phase 2
+        // For now, the old logic would be:
+        // if (!isInteractingWithRunCanvas || data.is_loop_active) {
+        //     if (data.preview_url) previewCanvasRunImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
+        // }
+        // This will be replaced by raw data fetching below.
+
+        const prevRunnerLoopActive = runnerLoopActive;
         runnerLoopActive = data.is_loop_active;
-        
-        // Handle recording timer based on runner loop activity
+
+        // Handle recording timer (remains the same)
         if (isRecording) {
-            if (runnerLoopActive && !prevRunnerLoopActive) { // Loop just became active, resume timer
-                recordingStartTime = Date.now(); // Reset start time to calculate from now
+            if (runnerLoopActive && !prevRunnerLoopActive) {
+                recordingStartTime = Date.now();
                 startRecordingTimer('Run');
-            } else if (!runnerLoopActive && prevRunnerLoopActive) { // Loop just became inactive, pause timer
+            } else if (!runnerLoopActive && prevRunnerLoopActive) {
                 clearInterval(recordingTimerIntervalId);
-                pausedRecordingDuration += (Date.now() - recordingStartTime); // Accumulate paused time
+                pausedRecordingDuration += (Date.now() - recordingStartTime);
             }
         }
 
@@ -932,10 +946,48 @@ async function fetchRunnerStatus() {
              runningStatusIntervalId = setInterval(fetchRunnerStatus, intervalTime);
         }
         updateRunnerControlsAvailability();
-    } catch (error) { 
+
+        // === Phase 2 Change: Add raw data fetching here ===
+        if (runnerModelLoaded && (!isInteractingWithRunCanvas || data.is_loop_active)) {
+            try {
+                const rawPreviewResponse = await fetch(`/get_live_runner_raw_preview_data?t=${new Date().getTime()}`);
+                if (rawPreviewResponse.ok) {
+                    const rawData = await rawPreviewResponse.json();
+                    if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) {
+                        if (previewCanvasRunCtx) {
+                            if (previewCanvasRunEl.width !== rawData.width || previewCanvasRunEl.height !== rawData.height) {
+                                previewCanvasRunEl.width = rawData.width;
+                                previewCanvasRunEl.height = rawData.height;
+                            }
+                            const imageData = previewCanvasRunCtx.createImageData(rawData.width, rawData.height);
+                            const pixelDataArray = new Uint8ClampedArray(rawData.pixels);
+                            imageData.data.set(pixelDataArray);
+                            previewCanvasRunCtx.putImageData(imageData, 0, 0);
+                        }
+                    } else if (!rawData.success && previewCanvasRunCtx) {
+                        // Draw placeholder if runner is not ready but model is loaded
+                        previewCanvasRunCtx.fillStyle = '#e0e0e0';
+                        previewCanvasRunCtx.fillRect(0, 0, previewCanvasRunEl.width, previewCanvasRunEl.height);
+                        previewCanvasRunCtx.fillStyle = '#555';
+                        previewCanvasRunCtx.font = '20px sans-serif';
+                        previewCanvasRunCtx.textAlign = 'center';
+                        previewCanvasRunCtx.textBaseline = 'middle'; // Added for vertical centering
+                        previewCanvasRunCtx.fillText('Runner State Unavailable', previewCanvasRunEl.width / 2, previewCanvasRunEl.height / 2);
+                    }
+                } else {
+                    console.error("Failed to fetch raw preview data. Response not OK:", rawPreviewResponse.status);
+                }
+            } catch (pixelError) {
+                console.error("Error fetching or drawing raw pixel data:", pixelError);
+            }
+        }
+        // === End of Phase 2 Change ===
+
+
+    } catch (error) {
         runStatusDiv.textContent = `Runner status fetch error: ${error}. Polling might stop.`;
-        runnerLoopActive = false; 
-        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); runningStatusIntervalId = null; 
+        runnerLoopActive = false;
+        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); runningStatusIntervalId = null;
         updateRunnerControlsAvailability();
     }
 }
@@ -978,7 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     takeScreenshotRunBtn.addEventListener('click', () => {
-        captureCanvasAsImage(previewCanvasRunImgEl, 'NCA_Run_Preview');
+        captureCanvasAsImage(previewCanvasRunEl, 'NCA_Run_Preview'); // Pass the canvas element
     });
 
     startRecordingTrainBtn.addEventListener('click', () => {
@@ -996,7 +1048,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     startRecordingRunBtn.addEventListener('click', () => {
         if (runnerLoopActive) {
-            startRecording(previewCanvasRunImgEl, 'Run_Preview');
+            startRecording(previewCanvasRunEl, 'Run_Preview'); // Pass the canvas element
         } else {
             showGlobalStatus('Runner loop must be active to record video.', false);
         }
@@ -1008,7 +1060,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='32' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`;
     
     trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress');
-    previewCanvasRunImgEl.src = svgPlaceholder('Runner Preview');
 
     // Initial calls after DOM is ready and tab is set
     // updateTrainerControlsAvailability(); // Called by openTab
@@ -1036,3 +1087,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+if (previewCanvasRunCtx) { // New placeholder drawing for runner canvas
+    const dimW = parseInt(previewCanvasRunEl.getAttribute('width')) || 512;
+    const dimH = parseInt(previewCanvasRunEl.getAttribute('height')) || 512;
+    previewCanvasRunCtx.fillStyle = '#f0f0f0';
+    previewCanvasRunCtx.fillRect(0, 0, dimW, dimH);
+    previewCanvasRunCtx.fillStyle = '#6c757d';
+    previewCanvasRunCtx.font = '32px sans-serif';
+    previewCanvasRunCtx.textAlign = 'center';
+    previewCanvasRunCtx.textBaseline = 'middle';
+    previewCanvasRunCtx.fillText('Runner Preview', dimW / 2, dimH / 2);
+}

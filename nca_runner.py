@@ -3,7 +3,8 @@
 
 import numpy as np
 import tensorflow as tf
-import threading 
+import threading
+import time
 from nca_globals import CHANNEL_N, HISTORY_MAX_SIZE
 
 class NCARunner:
@@ -18,9 +19,15 @@ class NCARunner:
             tf.print(f"NCARunner: Invalid initial_state_shape {initial_state_shape_tuple}. Using default {(self.h,self.w,self.ch)}.")
 
         with self._state_lock:
-            self.current_state = self._initialize_run_state_unsafe() 
-            self.history = [self.current_state.copy()] 
+            self.current_state = self._initialize_run_state_unsafe()
+            self.history = [self.current_state.copy()]
             self.history_index = 0
+        
+        # New attributes for FPS calculation
+        self.actual_fps = 0.0
+        self.last_fps_calc_time = time.perf_counter()
+        self.steps_since_last_fps_calc = 0
+        
         tf.print(f"NCARunner initialized with shape: {(self.h, self.w, self.ch)}")
 
     def _initialize_run_state_unsafe(self): 
@@ -60,10 +67,19 @@ class NCARunner:
                     self.history = self.history[num_to_remove:]
                     self.history_index -= num_to_remove
                 
-                return self.current_state 
+                # Update FPS calculation counters
+                self.steps_since_last_fps_calc += 1
+                now = time.perf_counter()
+                time_delta = now - self.last_fps_calc_time
+                if time_delta >= 1.0: # Calculate FPS roughly every second
+                    self.actual_fps = self.steps_since_last_fps_calc / time_delta
+                    self.last_fps_calc_time = now
+                    self.steps_since_last_fps_calc = 0
+                
+                return self.current_state
             except Exception as e_detail:
                 tf.print(f"NCARunner: Error during step: {e_detail}")
-                return self.current_state 
+                return self.current_state
 
     def modify_area(self, tool_mode, norm_x, norm_y, norm_brush_size_factor, 
                     canvas_render_width, canvas_render_height, draw_color_hex=None):
