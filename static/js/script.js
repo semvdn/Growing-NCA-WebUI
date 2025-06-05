@@ -442,9 +442,10 @@ stopTrainingBtn.addEventListener('click', async () => {
 });
 
 saveTrainerModelBtn.addEventListener('click', async () => {
-    if (!trainerInitialized) return; 
+    if (!trainerInitialized) return;
     const response = await postRequest('/save_trainer_model');
-    showGlobalStatus(response.message, response.success);
+    // Update message to reflect checkpointing
+    showGlobalStatus(response.message || "Checkpoint saved!", response.success);
 });
 
 loadTrainerModelBtn.addEventListener('click', async () => {

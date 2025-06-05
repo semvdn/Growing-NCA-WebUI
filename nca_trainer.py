@@ -14,10 +14,15 @@ class NCATrainer:
         self.config = config
         self.ca = CAModel(channel_n=CHANNEL_N, fire_rate=config['fire_rate'])
         
+        self.run_dir = config.get('run_dir') # New: Store the run-specific directory
         target_source_kind = config.get('target_source_kind', 'file') # Default to file if not specified
 
         self.best_loss = float('inf') # Initialize best loss tracking
-        self.best_model_save_path = os.path.join(config['model_folder_path'], "best_trainer_model.h5")
+        # Save best model within the run_dir if available, otherwise to the general model folder
+        if self.run_dir:
+            self.best_model_save_path = os.path.join(self.run_dir, "best_model.weights.h5")
+        else:
+            self.best_model_save_path = os.path.join(config['model_folder_path'], "best_trainer_model.h5")
         tf.print(f"NCATrainer: Best model will be saved to {self.best_model_save_path}")
 
         if target_source_kind == "drawn_defines_padded_grid":
