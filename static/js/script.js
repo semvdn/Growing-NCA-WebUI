@@ -423,14 +423,9 @@ function drawOnTrainerCanvas(event) {
     const brushOpacity = parseInt(trainBrushOpacitySlider.value) / 100;
     const color = trainDrawColorPicker.value;
 
-    // Set global composite operation for the temporary canvas
-    if (isEraserModeTrain) {
-        tempTrainerCtx.globalCompositeOperation = 'destination-out'; // Erase mode on temp canvas
-    } else {
-        tempTrainerCtx.globalCompositeOperation = 'source-over'; // Draw mode on temp canvas
-    }
-
-    // Set brush style for the temporary canvas (always full opacity here)
+    // The temporary canvas always draws opaque shapes.
+    // The compositing and opacity are applied when drawing from temp to main canvas.
+    tempTrainerCtx.globalCompositeOperation = 'source-over'; // Always draw opaque on temp canvas
     tempTrainerCtx.lineWidth = brushSize * 2;
     tempTrainerCtx.lineCap = 'round';
     tempTrainerCtx.lineJoin = 'round';
@@ -442,7 +437,7 @@ function drawOnTrainerCanvas(event) {
         const b = bigint & 255;
         return `${r},${g},${b}`;
     };
-    // Draw with full opacity on the temporary canvas
+    // Draw with full opacity on the temporary canvas, color doesn't matter for eraser
     tempTrainerCtx.strokeStyle = `rgb(${hexToRgb(color)})`;
     tempTrainerCtx.fillStyle = `rgb(${hexToRgb(color)})`;
 
@@ -461,16 +456,26 @@ function drawOnTrainerCanvas(event) {
     lastX = x;
     lastY = y;
 
-    // Now, draw the temporary canvas onto the main canvas with the desired opacity
-    // First, restore the main canvas to its state *before* this stroke started
+    // Restore the main canvas to its state *before* this stroke started
     trainerCtx.clearRect(0, 0, trainerDrawCanvasEl.width, trainerDrawCanvasEl.height);
     if (currentStrokeBaseImageData) {
         trainerCtx.putImageData(currentStrokeBaseImageData, 0, 0); // Draw base
     }
 
+    // Apply global composite operation and opacity to the main canvas
+    if (isEraserModeTrain) {
+        trainerCtx.globalCompositeOperation = 'destination-out'; // Erase mode on main canvas
+    } else {
+        trainerCtx.globalCompositeOperation = 'source-over'; // Draw mode on main canvas
+    }
     trainerCtx.globalAlpha = brushOpacity; // Apply overall opacity for the stroke
-    trainerCtx.drawImage(tempTrainerCanvas, 0, 0); // Draw temp on top with opacity
-    trainerCtx.globalAlpha = 1; // Reset globalAlpha for future operations
+
+    // Draw the temporary canvas onto the main canvas
+    trainerCtx.drawImage(tempTrainerCanvas, 0, 0);
+
+    // Reset globalAlpha and globalCompositeOperation for future operations
+    trainerCtx.globalAlpha = 1;
+    trainerCtx.globalCompositeOperation = 'source-over';
 
     if (trainerTargetConfirmed) {
         trainingStatusDiv.textContent = "Status: Drawing modified. Confirm again to use as target.";
