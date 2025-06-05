@@ -373,8 +373,7 @@ function initializeTrainerDrawCanvas() {
     trainerDrawCanvasEl.width = DRAW_CANVAS_WIDTH;
     trainerDrawCanvasEl.height = DRAW_CANVAS_HEIGHT;
     trainerCtx = trainerDrawCanvasEl.getContext('2d');
-    trainerCtx.fillStyle = 'white';
-    trainerCtx.fillRect(0, 0, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT);
+    trainerCtx.clearRect(0, 0, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT);
     trainerDrawCanvasEl.classList.add('active-draw');
     trainerProgressImgEl.style.display = 'none';
     trainerDrawCanvasEl.style.display = 'inline-block';
@@ -387,8 +386,7 @@ function initializeTrainerDrawCanvas() {
 
 function clearTrainerDrawCanvas() {
     if (trainerCtx) {
-        trainerCtx.fillStyle = 'white'; 
-        trainerCtx.fillRect(0, 0, trainerDrawCanvasEl.width, trainerDrawCanvasEl.height);
+        trainerCtx.clearRect(0, 0, trainerDrawCanvasEl.width, trainerDrawCanvasEl.height);
         trainerTargetConfirmed = false; 
         initTrainerBtn.disabled = true; 
         updateTrainerControlsAvailability();
