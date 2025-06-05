@@ -266,8 +266,8 @@
                 <h4>Trainer Target / Progress</h4>
                 <!-- This will be replaced by a canvas for drawing, or show an img for uploaded target / training progress -->
                 <div class="canvas-container">
-                    <canvas id="trainerDrawCanvas" width="256" height="256"></canvas> <!-- Fixed size, matching DRAW_CANVAS_DISPLAY_SIZE -->
-                    <img id="trainerProgressImg" src="" alt="Training Progress" style="display:none; width: 512px; height: 512px; border: 1px solid #adb5bd; background-color: #f8f9fa;">
+                    <canvas id="trainerDrawCanvas" width="256" height="256"></canvas>
+                    <canvas id="trainerProgressCanvas" width="512" height="512" style="display:none; border: 1px solid #adb5bd; background-color: #f8f9fa; max-width: 100%; height: auto; image-rendering: pixelated;"></canvas>
                 </div>
                 <div class="status-box" id="trainingStatus">Status: Define a target pattern above.</div>
                 <div id="trainingModelInfo">

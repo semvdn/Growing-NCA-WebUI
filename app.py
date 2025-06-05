@@ -14,9 +14,10 @@ from werkzeug.utils import secure_filename
 import PIL.Image
 import base64
 
-from nca_globals import (TARGET_SIZE, TARGET_PADDING, DEFAULT_FIRE_RATE, 
+from nca_globals import (TARGET_SIZE, TARGET_PADDING, DEFAULT_FIRE_RATE,
                          DEFAULT_BATCH_SIZE, DEFAULT_POOL_SIZE, CHANNEL_N,
-                         DEFAULT_RUNNER_SLEEP_DURATION, DRAW_CANVAS_DISPLAY_SIZE) 
+                         DEFAULT_RUNNER_SLEEP_DURATION, RUNNER_SLEEP_DURATION_TRAINING_ACTIVE, # New import
+                         DRAW_CANVAS_DISPLAY_SIZE)
 from nca_utils import load_image_from_file, np2pil, to_rgb, get_model_summary, format_training_time # load_emoji removed
 from nca_model import CAModel
 from nca_trainer import NCATrainer
@@ -192,7 +193,43 @@ def load_target_from_file_route():
         tf.print(f"Error in /load_target_from_file: {e_detail}\n{traceback.format_exc()}")
         return jsonify({"success": False, "message": f"Error loading trainer target from file: {str(e_detail)}"}), 500
 
-@app.route('/get_trainer_target_preview') 
+@app.route('/get_trainer_target_raw_preview_data') # NEW endpoint for raw pixel data
+def get_trainer_target_raw_preview_data_route():
+    preview_image_data = None
+    grid_h, grid_w = 0, 0
+
+    if trainer_target_image_rgba is not None:
+        if trainer_target_source_kind == "drawn_defines_padded_grid":
+            preview_image_data = trainer_target_image_rgba # Already final size
+            grid_h, grid_w = preview_image_data.shape[0], preview_image_data.shape[1]
+        elif trainer_target_source_kind == "file":
+            # For files, preview the content padded as the trainer would
+            p = TARGET_PADDING
+            padded_content = tf.pad(trainer_target_image_rgba, [(p,p),(p,p),(0,0)]).numpy()
+            preview_image_data = padded_content
+            grid_h, grid_w = preview_image_data.shape[0], preview_image_data.shape[1]
+        # else: preview_image_data remains None
+
+    if preview_image_data is None:
+        return jsonify({"success": False, "message": "No trainer target state available", "height": 0, "width": 0, "pixels": []})
+
+    if preview_image_data.shape[-1] < 4:
+        return jsonify({"success": False, "message": "Insufficient channels in state for RGBA", "height": grid_h, "width": grid_w, "pixels": []})
+
+    rgba_data = preview_image_data[..., :4]  # Extract RGBA channels
+    display_rgba_uint8 = np.uint8(np.clip(rgba_data, 0, 1) * 255)
+    pixel_list = display_rgba_uint8.flatten().tolist()
+
+    return jsonify({
+        "success": True,
+        "height": grid_h,
+        "width": grid_w,
+        "pixels": pixel_list
+    })
+
+# The old /get_trainer_target_preview route can be removed or kept for compatibility if needed.
+# For now, we'll keep it but it won't be used by the new frontend.
+@app.route('/get_trainer_target_preview')
 def get_trainer_target_preview_route():
     # This endpoint now previews trainer_target_image_rgba directly.
     # If it's a "drawn_defines_padded_grid", it's already the final size.
@@ -219,9 +256,9 @@ def get_trainer_target_preview_route():
         else: # No target yet or unknown kind
              preview_image_data = None # Will show placeholder
     
-    return get_preview_image_response(preview_image_data, zoom_factor=max(1,zoom), 
-                                      default_width_px=DRAW_CANVAS_DISPLAY_SIZE, 
-                                      default_height_px=DRAW_CANVAS_DISPLAY_SIZE) 
+    return get_preview_image_response(preview_image_data, zoom_factor=max(1,zoom),
+                                      default_width_px=DRAW_CANVAS_DISPLAY_SIZE,
+                                      default_height_px=DRAW_CANVAS_DISPLAY_SIZE)
 
 
 @app.route('/initialize_trainer', methods=['POST'])
@@ -268,7 +305,7 @@ def initialize_trainer_route():
             "success": True,
             "message": "NCA Trainer Initialized. Ready to train.",
             "model_summary": model_summary_str,
-            "initial_state_preview_url": "/get_live_trainer_preview"
+            "initial_state_preview_url": "/get_live_trainer_raw_preview_data" # MODIFIED
         })
     except Exception as e_detail:
         tf.print(f"Error in /initialize_trainer: {e_detail}\n{traceback.format_exc()}")
@@ -322,10 +359,10 @@ def get_training_status_route():
     with train_thread_lock: 
         if not current_nca_trainer:
             return jsonify({
-                "status_message": "Trainer Not Initialized", 
-                "is_training": False, 
-                "preview_url": "/get_live_trainer_preview" 
-            }), 200 
+                "status_message": "Trainer Not Initialized",
+                "is_training": False,
+                "preview_url": "/get_live_trainer_raw_preview_data" # MODIFIED
+            }), 200
 
         status_data = current_nca_trainer.get_status()
         is_currently_training = training_thread.is_alive() if training_thread else False
@@ -344,18 +381,54 @@ def get_training_status_route():
         "preview_url": "/get_live_trainer_preview" 
     })
 
-@app.route('/get_live_trainer_preview') 
+@app.route('/get_live_trainer_raw_preview_data') # NEW endpoint for raw pixel data
+def get_live_trainer_raw_preview_data_route():
+    preview_state_to_show = None
+    grid_h, grid_w = 0, 0
+
+    with train_thread_lock:
+        if current_nca_trainer:
+            if current_nca_trainer.last_preview_state is not None:
+                preview_state_to_show = current_nca_trainer.last_preview_state
+            elif current_nca_trainer.pool and len(current_nca_trainer.pool) > 0: # Initial seed from pool
+                preview_state_to_show = current_nca_trainer.pool.x[0].copy()
+            
+            if preview_state_to_show is not None:
+                grid_h, grid_w = preview_state_to_show.shape[0], preview_state_to_show.shape[1]
+            elif trainer_actual_target_shape: # Fallback to stored shape if no live state yet
+                grid_h, grid_w = trainer_actual_target_shape[0], trainer_actual_target_shape[1]
+
+    if preview_state_to_show is None:
+        return jsonify({"success": False, "message": "No trainer state available", "height": 0, "width": 0, "pixels": []})
+
+    if preview_state_to_show.shape[-1] < 4:
+        return jsonify({"success": False, "message": "Insufficient channels in state for RGBA", "height": grid_h, "width": grid_w, "pixels": []})
+
+    rgba_data = preview_state_to_show[..., :4]  # Extract RGBA channels
+    display_rgba_uint8 = np.uint8(np.clip(rgba_data, 0, 1) * 255)
+    pixel_list = display_rgba_uint8.flatten().tolist()
+
+    return jsonify({
+        "success": True,
+        "height": grid_h,
+        "width": grid_w,
+        "pixels": pixel_list
+    })
+
+# The old /get_live_trainer_preview route can remain as is, or be deprecated later.
+# For now, it's not actively used by the new frontend.
+@app.route('/get_live_trainer_preview')
 def get_live_trainer_preview_route():
     preview_state_to_show = None
     # Base placeholder size on DRAW_CANVAS_DISPLAY_SIZE for consistency
-    default_w, default_h = DRAW_CANVAS_DISPLAY_SIZE, DRAW_CANVAS_DISPLAY_SIZE 
+    default_w, default_h = DRAW_CANVAS_DISPLAY_SIZE, DRAW_CANVAS_DISPLAY_SIZE
     zoom = 1
-    with train_thread_lock: 
-        if current_nca_trainer: 
+    with train_thread_lock:
+        if current_nca_trainer:
             if current_nca_trainer.last_preview_state is not None:
-                preview_state_to_show = current_nca_trainer.last_preview_state 
+                preview_state_to_show = current_nca_trainer.last_preview_state
             elif current_nca_trainer.pool and len(current_nca_trainer.pool) > 0: # Initial seed from pool
-                preview_state_to_show = current_nca_trainer.pool.x[0].copy() 
+                preview_state_to_show = current_nca_trainer.pool.x[0].copy()
             
             # Determine zoom factor based on actual operational grid size of the trainer
             if current_nca_trainer.pad_target is not None:
@@ -365,7 +438,7 @@ def get_live_trainer_preview_route():
                  op_grid_h = trainer_actual_target_shape[0]
                  if op_grid_h > 0 : zoom = DRAW_CANVAS_DISPLAY_SIZE // op_grid_h
 
-    return get_preview_image_response(preview_state_to_show, zoom_factor=max(1, zoom), 
+    return get_preview_image_response(preview_state_to_show, zoom_factor=max(1, zoom),
                                       default_width_px=default_w, default_height_px=default_h)
 
 # ... (save_trainer_model - same)
@@ -710,22 +783,27 @@ def load_model_for_runner_route():
 
 # ... (running_loop_task_function, start_running, stop_running, set_runner_speed, 
 #      get_runner_status, get_live_runner_preview, runner_action routes - same as previous correct version)
-def running_loop_task_function(): 
-    global runner_sleep_duration 
+def running_loop_task_function():
+    global runner_sleep_duration, training_thread # Need to access training_thread
     tf.print("Runner thread started.")
     while not stop_running_event.is_set():
         loop_start_time = time.perf_counter()
         try:
-            with run_thread_lock: 
-                if not current_nca_runner: 
+            with run_thread_lock:
+                if not current_nca_runner:
                     tf.print("Runner gone from running_loop, stopping.")
-                    break 
-                current_nca_runner.step() 
+                    break
+                current_nca_runner.step()
             
-            current_sleep = runner_sleep_duration - (time.perf_counter() - loop_start_time)
+            # Determine sleep duration based on whether training is active
+            effective_sleep_duration = DEFAULT_RUNNER_SLEEP_DURATION
+            if training_thread and training_thread.is_alive():
+                effective_sleep_duration = RUNNER_SLEEP_DURATION_TRAINING_ACTIVE
+            
+            current_sleep = effective_sleep_duration - (time.perf_counter() - loop_start_time)
             if current_sleep > 0: time.sleep(current_sleep)
-            else: time.sleep(0.001)
-        except Exception as e: tf.print(f"Error in running_loop: {e}\n{traceback.format_exc()}"); break 
+            else: time.sleep(0.001) # Minimum sleep to prevent busy-waiting
+        except Exception as e: tf.print(f"Error in running_loop: {e}\n{traceback.format_exc()}"); break
     tf.print("Runner thread ended.")
 @app.route('/start_running', methods=['POST'])
 def start_running_loop_route(): 

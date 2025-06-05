@@ -5,7 +5,12 @@ let runningStatusIntervalId = null;
 
 // --- Trainer Canvas Elements & State ---
 const trainerDrawCanvasEl = document.getElementById('trainerDrawCanvas');
-const trainerProgressImgEl = document.getElementById('trainerProgressImg'); 
+const trainerProgressCanvasEl = document.getElementById('trainerProgressCanvas'); // NEW
+let trainerProgressCtx = null; // NEW
+if (trainerProgressCanvasEl) { // NEW
+    trainerProgressCtx = trainerProgressCanvasEl.getContext('2d'); // NEW
+    trainerProgressCtx.imageSmoothingEnabled = false; // Crucial for pixelated scaling // NEW
+} // NEW
 const trainDrawColorPicker = document.getElementById('trainDrawColorPicker');
 const clearTrainCanvasBtn = document.getElementById('clearTrainCanvasBtn');
 const undoTrainCanvasBtn = document.getElementById('undoTrainCanvasBtn');
@@ -306,9 +311,9 @@ function updateTrainerControlsAvailability() {
 
     // Capture Tools
     const isTrainCanvasVisible = trainerDrawCanvasEl.style.display !== 'none';
-    const isTrainImgVisible = trainerProgressImgEl.style.display !== 'none';
-    takeScreenshotTrainBtn.disabled = !(isTrainCanvasVisible || isTrainImgVisible);
-    startRecordingTrainBtn.disabled = isRecording || !trainingLoopActive || !(isTrainCanvasVisible || isTrainImgVisible);
+    const isTrainProgressCanvasVisible = trainerProgressCanvasEl.style.display !== 'none'; // NEW
+    takeScreenshotTrainBtn.disabled = !(isTrainCanvasVisible || isTrainProgressCanvasVisible); // MODIFIED
+    startRecordingTrainBtn.disabled = isRecording || !trainingLoopActive || !(isTrainCanvasVisible || isTrainProgressCanvasVisible); // MODIFIED
     stopRecordingTrainBtn.disabled = !isRecording;
     recordingTimerTrain.style.display = isRecording ? 'inline' : 'none';
 }
@@ -357,21 +362,27 @@ function openTab(evt, tabId) {
     document.getElementById('RunPreviewArea').style.display = (tabId === 'RunTab') ? 'block' : 'none';
 
     if (tabId === 'TrainTab') {
-        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId); runningStatusIntervalId = null;
-        if ((trainerInitialized || trainingLoopActive) && !trainingStatusIntervalId) {
-             // Check if already polling. Start only if needed.
-             if (!trainingStatusIntervalId) trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200); 
+        if (runningStatusIntervalId) {
+            clearInterval(runningStatusIntervalId);
+            runningStatusIntervalId = null;
         }
-        fetchTrainerStatus(); 
+        // Only start training status polling if trainer is initialized or training is active
+        if ((trainerInitialized || trainingLoopActive) && !trainingStatusIntervalId) {
+            trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
+        }
+        fetchTrainerStatus();
         updateTrainerControlsAvailability();
     } else if (tabId === 'RunTab') {
-        if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
-        if (runnerModelLoaded && !runningStatusIntervalId) { 
-            const fps = parseInt(runFpsSlider.value);
-            // Check if already polling. Start only if needed.
-            if (!runningStatusIntervalId) runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / fps)); 
+        if (trainingStatusIntervalId) { // Always clear training interval when leaving TrainTab
+            clearInterval(trainingStatusIntervalId);
+            trainingStatusIntervalId = null;
         }
-        fetchRunnerStatus(); 
+        // Only start runner status polling if a model is loaded
+        if (runnerModelLoaded && !runningStatusIntervalId) {
+            const fps = parseInt(runFpsSlider.value);
+            runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / fps));
+        }
+        fetchRunnerStatus();
         updateRunnerControlsAvailability();
     }
 }
@@ -384,7 +395,7 @@ function initializeTrainerDrawCanvas() {
     trainerCtx = trainerDrawCanvasEl.getContext('2d');
     trainerCtx.clearRect(0, 0, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT);
     trainerDrawCanvasEl.classList.add('active-draw');
-    trainerProgressImgEl.style.display = 'none';
+    trainerProgressCanvasEl.style.display = 'none'; // MODIFIED
     trainerDrawCanvasEl.style.display = 'inline-block';
     trainerTargetConfirmed = false;
     initTrainerBtn.disabled = true;
@@ -585,8 +596,33 @@ confirmDrawingBtnTrain.addEventListener('click', async () => {
     if (response.success) {
         trainerTargetConfirmed = true;
         trainerDrawCanvasEl.style.display = 'none';
-        trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`;
-        trainerProgressImgEl.style.display = 'inline-block';
+        // trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; // REMOVED
+        // trainerProgressImgEl.style.display = 'inline-block'; // REMOVED
+        trainerProgressCanvasEl.style.display = 'inline-block'; // NEW
+        // Fetch raw pixel data for the confirmed target and draw it
+        try { // NEW
+            const rawPreviewResponse = await fetch(`/get_trainer_target_raw_preview_data?t=${new Date().getTime()}`); // NEW
+            if (rawPreviewResponse.ok) { // NEW
+                const rawData = await rawPreviewResponse.json(); // NEW
+                if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) { // NEW
+                    drawUpscaledPixels(trainerProgressCtx, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT, rawData.pixels, rawData.width, rawData.height); // NEW
+                } else { // NEW
+                    console.error("Failed to get raw target preview data:", rawData.message); // NEW
+                    trainerProgressCtx.clearRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                    trainerProgressCtx.fillStyle = '#e0e0e0'; // NEW
+                    trainerProgressCtx.fillRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                    trainerProgressCtx.fillStyle = '#555'; // NEW
+                    trainerProgressCtx.font = '20px sans-serif'; // NEW
+                    trainerProgressCtx.textAlign = 'center'; // NEW
+                    trainerProgressCtx.textBaseline = 'middle'; // NEW
+                    trainerProgressCtx.fillText('Target Preview Unavailable', trainerProgressCanvasEl.width / 2, trainerProgressCanvasEl.height / 2); // NEW
+                } // NEW
+            } else { // NEW
+                console.error("Failed to fetch raw target preview data. Response not OK:", rawPreviewResponse.status); // NEW
+            } // NEW
+        } catch (pixelError) { // NEW
+            console.error("Error fetching or drawing raw target pixel data:", pixelError); // NEW
+        } // NEW
         trainingStatusDiv.textContent = "Status: Drawn pattern confirmed. Initialize Trainer.";
     }
     updateTrainerControlsAvailability();
@@ -600,16 +636,41 @@ experimentTypeSelectTrain.addEventListener('change', () => {
     damageNLabelTrain.style.display = isRegen ? 'block' : 'none';
 });
 
-async function handleLoadTargetForTrainerFromFile(formData) { 
+async function handleLoadTargetForTrainerFromFile(formData) {
     const response = await postFormRequest('/load_target_from_file', formData);
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         trainerDrawCanvasEl.style.display = 'none';
-        trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; 
-        trainerProgressImgEl.style.display = 'inline-block';
+        // trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; // REMOVED
+        // trainerProgressImgEl.style.display = 'inline-block'; // REMOVED
+        trainerProgressCanvasEl.style.display = 'inline-block'; // NEW
+        // Fetch raw pixel data for the confirmed target and draw it
+        try { // NEW
+            const rawPreviewResponse = await fetch(`/get_trainer_target_raw_preview_data?t=${new Date().getTime()}`); // NEW
+            if (rawPreviewResponse.ok) { // NEW
+                const rawData = await rawPreviewResponse.json(); // NEW
+                if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) { // NEW
+                    drawUpscaledPixels(trainerProgressCtx, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT, rawData.pixels, rawData.width, rawData.height); // NEW
+                } else { // NEW
+                    console.error("Failed to get raw target preview data:", rawData.message); // NEW
+                    trainerProgressCtx.clearRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                    trainerProgressCtx.fillStyle = '#e0e0e0'; // NEW
+                    trainerProgressCtx.fillRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                    trainerProgressCtx.fillStyle = '#555'; // NEW
+                    trainerProgressCtx.font = '20px sans-serif'; // NEW
+                    trainerProgressCtx.textAlign = 'center'; // NEW
+                    trainerProgressCtx.textBaseline = 'middle'; // NEW
+                    trainerProgressCtx.fillText('Target Preview Unavailable', trainerProgressCanvasEl.width / 2, trainerProgressCanvasEl.height / 2); // NEW
+                } // NEW
+            } else { // NEW
+                console.error("Failed to fetch raw target preview data. Response not OK:", rawPreviewResponse.status); // NEW
+            } // NEW
+        } catch (pixelError) { // NEW
+            console.error("Error fetching or drawing raw target pixel data:", pixelError); // NEW
+        } // NEW
         
-        trainerTargetConfirmed = true; 
-        trainerInitialized = false; 
+        trainerTargetConfirmed = true;
+        trainerInitialized = false;
         trainingLoopActive = false;
         if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
         trainModelParamsText.textContent = "N/A (File target loaded, initialize Trainer)";
@@ -634,8 +695,9 @@ initTrainerBtn.addEventListener('click', async () => {
     if (!trainerTargetConfirmed) {
         showGlobalStatus("Please confirm a drawn target or load a file first.", false); return;
     }
-    trainerDrawCanvasEl.style.display = 'none'; 
-    trainerProgressImgEl.style.display = 'inline-block'; 
+    trainerDrawCanvasEl.style.display = 'none';
+    // trainerProgressImgEl.style.display = 'inline-block'; // REMOVED
+    trainerProgressCanvasEl.style.display = 'inline-block'; // NEW
 
     const payload = {
         experiment_type: experimentTypeSelectTrain.value,
@@ -648,10 +710,36 @@ initTrainerBtn.addEventListener('click', async () => {
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         trainModelParamsText.textContent = response.model_summary || 'N/A';
-        trainerProgressImgEl.src = `${response.initial_state_preview_url}?t=${new Date().getTime()}`;
+        // trainerProgressImgEl.src = `${response.initial_state_preview_url}?t=${new Date().getTime()}`; // REMOVED
+        trainerProgressCanvasEl.style.display = 'inline-block'; // NEW
+        trainerDrawCanvasEl.style.display = 'none'; // NEW
+        // Fetch raw pixel data for the initial state and draw it
+        try { // NEW
+            const rawPreviewResponse = await fetch(`/get_live_trainer_raw_preview_data?t=${new Date().getTime()}`); // NEW
+            if (rawPreviewResponse.ok) { // NEW
+                const rawData = await rawPreviewResponse.json(); // NEW
+                if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) { // NEW
+                    drawUpscaledPixels(trainerProgressCtx, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT, rawData.pixels, rawData.width, rawData.height); // NEW
+                } else { // NEW
+                    console.error("Failed to get raw initial state preview data:", rawData.message); // NEW
+                    trainerProgressCtx.clearRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                    trainerProgressCtx.fillStyle = '#e0e0e0'; // NEW
+                    trainerProgressCtx.fillRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                    trainerProgressCtx.fillStyle = '#555'; // NEW
+                    trainerProgressCtx.font = '20px sans-serif'; // NEW
+                    trainerProgressCtx.textAlign = 'center'; // NEW
+                    trainerProgressCtx.textBaseline = 'middle'; // NEW
+                    trainerProgressCtx.fillText('Initial State Unavailable', trainerProgressCanvasEl.width / 2, trainerProgressCanvasEl.height / 2); // NEW
+                } // NEW
+            } else { // NEW
+                console.error("Failed to fetch raw initial state preview data. Response not OK:", rawPreviewResponse.status); // NEW
+            } // NEW
+        } catch (pixelError) { // NEW
+            console.error("Error fetching or drawing raw initial state pixel data:", pixelError); // NEW
+        } // NEW
         trainerInitialized = true;
         trainingLoopActive = false;
-        if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId); 
+        if (trainingStatusIntervalId) clearInterval(trainingStatusIntervalId);
         if (!trainingStatusIntervalId && currentOpenTab === 'TrainTab') {
              trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
         }
@@ -672,10 +760,10 @@ startTrainingBtn.addEventListener('click', async () => {
     showGlobalStatus(response.message, response.success);
     if (response.success) {
         trainingLoopActive = true;
-        trainerDrawCanvasEl.style.display = 'none'; 
-        trainerProgressImgEl.style.display = 'inline-block'; 
-        if (!trainingStatusIntervalId && currentOpenTab === 'TrainTab') { 
-            trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200); 
+        trainerDrawCanvasEl.style.display = 'none';
+        trainerProgressCanvasEl.style.display = 'inline-block'; // MODIFIED
+        if (!trainingStatusIntervalId && currentOpenTab === 'TrainTab') {
+            trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
         }
     }
     updateTrainerControlsAvailability();
@@ -690,8 +778,12 @@ stopTrainingBtn.addEventListener('click', async () => {
     }
     const response = await postRequest('/stop_training'); 
     showGlobalStatus(response.message, response.success);
-    trainingLoopActive = false; 
-    fetchTrainerStatus(); 
+    trainingLoopActive = false;
+    if (trainingStatusIntervalId) { // Explicitly clear interval when training stops
+        clearInterval(trainingStatusIntervalId);
+        trainingStatusIntervalId = null;
+    }
+    fetchTrainerStatus();
     updateTrainerControlsAvailability();
 });
 
@@ -756,16 +848,64 @@ async function fetchTrainerStatus() {
         // Include elapsed time in the status message
         trainingStatusDiv.textContent = data.status_message || `Step: ${data.step || 0}, Loss: ${data.loss || 'N/A'}, Time: ${data.training_time || 'N/A'}`;
         
-        if (data.is_training || (trainerInitialized && trainerTargetConfirmed)) { 
+        if (data.is_training || (trainerInitialized && trainerTargetConfirmed)) {
             trainerDrawCanvasEl.style.display = 'none';
-            trainerProgressImgEl.style.display = 'inline-block';
-            if (data.preview_url) trainerProgressImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`;
+            trainerProgressCanvasEl.style.display = 'inline-block'; // MODIFIED
+            // if (data.preview_url) trainerProgressImgEl.src = `${data.preview_url}?t=${new Date().getTime()}`; // REMOVED
+            // === Phase 2 Change: Add raw data fetching here === // NEW
+            try { // NEW
+                const rawPreviewResponse = await fetch(`/get_live_trainer_raw_preview_data?t=${new Date().getTime()}`); // NEW
+                if (rawPreviewResponse.ok) { // NEW
+                    const rawData = await rawPreviewResponse.json(); // NEW
+                    if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) { // NEW
+                        drawUpscaledPixels(trainerProgressCtx, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT, rawData.pixels, rawData.width, rawData.height); // NEW
+                    } else if (!rawData.success && trainerProgressCtx) { // NEW
+                        // Draw placeholder if trainer is not ready but model is loaded
+                        trainerProgressCtx.fillStyle = '#e0e0e0'; // NEW
+                        trainerProgressCtx.fillRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                        trainerProgressCtx.fillStyle = '#555'; // NEW
+                        trainerProgressCtx.font = '20px sans-serif'; // NEW
+                        trainerProgressCtx.textAlign = 'center'; // NEW
+                        trainerProgressCtx.textBaseline = 'middle'; // NEW
+                        trainerProgressCtx.fillText('Training State Unavailable', trainerProgressCanvasEl.width / 2, trainerProgressCanvasEl.height / 2); // NEW
+                    } // NEW
+                } else { // NEW
+                    console.error("Failed to fetch raw trainer preview data. Response not OK:", rawPreviewResponse.status); // NEW
+                } // NEW
+            } catch (pixelError) { // NEW
+                console.error("Error fetching or drawing raw trainer pixel data:", pixelError); // NEW
+            } // NEW
+            // === End of Phase 2 Change === // NEW
         } else if (trainerTargetConfirmed && !trainerInitialized) { // Target confirmed, but not initialized yet
-            trainerDrawCanvasEl.style.display = 'none'; 
-            trainerProgressImgEl.style.display = 'inline-block';
-            trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; // Show confirmed target
+            trainerDrawCanvasEl.style.display = 'none';
+            trainerProgressCanvasEl.style.display = 'inline-block'; // MODIFIED
+            // trainerProgressImgEl.src = `/get_trainer_target_preview?t=${new Date().getTime()}`; // Show confirmed target // REMOVED
+            // Fetch raw pixel data for the confirmed target and draw it // NEW
+            try { // NEW
+                const rawPreviewResponse = await fetch(`/get_trainer_target_raw_preview_data?t=${new Date().getTime()}`); // NEW
+                if (rawPreviewResponse.ok) { // NEW
+                    const rawData = await rawPreviewResponse.json(); // NEW
+                    if (rawData.success && rawData.pixels && rawData.height > 0 && rawData.width > 0) { // NEW
+                        drawUpscaledPixels(trainerProgressCtx, DRAW_CANVAS_WIDTH, DRAW_CANVAS_HEIGHT, rawData.pixels, rawData.width, rawData.height); // NEW
+                    } else { // NEW
+                        console.error("Failed to get raw target preview data:", rawData.message); // NEW
+                        trainerProgressCtx.clearRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                        trainerProgressCtx.fillStyle = '#e0e0e0'; // NEW
+                        trainerProgressCtx.fillRect(0, 0, trainerProgressCanvasEl.width, trainerProgressCanvasEl.height); // NEW
+                        trainerProgressCtx.fillStyle = '#555'; // NEW
+                        trainerProgressCtx.font = '20px sans-serif'; // NEW
+                        trainerProgressCtx.textAlign = 'center'; // NEW
+                        trainerProgressCtx.textBaseline = 'middle'; // NEW
+                        trainerProgressCtx.fillText('Target Preview Unavailable', trainerProgressCanvasEl.width / 2, trainerProgressCanvasEl.height / 2); // NEW
+                    } // NEW
+                } else { // NEW
+                    console.error("Failed to fetch raw target preview data. Response not OK:", rawPreviewResponse.status); // NEW
+                } // NEW
+            } catch (pixelError) { // NEW
+                console.error("Error fetching or drawing raw target pixel data:", pixelError); // NEW
+            } // NEW
         } else { // No target confirmed, not initialized
-            initializeTrainerDrawCanvas(); 
+            initializeTrainerDrawCanvas();
         }
 
         const prevTrainingLoopActive = trainingLoopActive;
@@ -783,13 +923,18 @@ async function fetchTrainerStatus() {
             }
         }
 
-        // If training just stopped, ensure interval is cleared or slowed
+        // If training just stopped, ensure interval is cleared
         if (prevTrainingLoopActive && !trainingLoopActive && trainingStatusIntervalId) {
-            // clearInterval(trainingStatusIntervalId); trainingStatusIntervalId = null;
-            // Or keep polling slowly
+            clearInterval(trainingStatusIntervalId);
+            trainingStatusIntervalId = null;
         } else if (trainingLoopActive && !trainingStatusIntervalId && currentOpenTab === 'TrainTab'){
             // Restart polling if it somehow stopped but should be active
-             trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
+            trainingStatusIntervalId = setInterval(fetchTrainerStatus, 1200);
+        }
+        // If training is not active and not initialized, ensure polling stops
+        if (!data.is_training && !trainerInitialized && trainingStatusIntervalId) {
+            clearInterval(trainingStatusIntervalId);
+            trainingStatusIntervalId = null;
         }
 
 
@@ -1139,6 +1284,18 @@ document.addEventListener('DOMContentLoaded', () => {
     highResCaptureCtx = highResCaptureCanvas.getContext('2d');
     highResCaptureCtx.imageSmoothingEnabled = false; // Crucial for pixelated scaling
 
+    // Initialize trainerProgressCanvas with a placeholder
+    if (trainerProgressCtx) { // NEW
+        const dimW = parseInt(trainerProgressCanvasEl.getAttribute('width')) || 512; // NEW
+        const dimH = parseInt(trainerProgressCanvasEl.getAttribute('height')) || 512; // NEW
+        trainerProgressCtx.fillStyle = '#f0f0f0'; // NEW
+        trainerProgressCtx.fillRect(0, 0, dimW, dimH); // NEW
+        trainerProgressCtx.fillStyle = '#6c757d'; // NEW
+        trainerProgressCtx.font = '32px sans-serif'; // NEW
+        trainerProgressCtx.textAlign = 'center'; // NEW
+        trainerProgressCtx.textBaseline = 'middle'; // NEW
+        trainerProgressCtx.fillText('Target / Training Progress', dimW / 2, dimH / 2); // NEW
+    } // NEW
 
     trainBrushSizeSlider.addEventListener('input', () => {
         trainBrushSizeValue.textContent = trainBrushSizeSlider.value;
@@ -1170,8 +1327,8 @@ document.addEventListener('DOMContentLoaded', () => {
     takeScreenshotTrainBtn.addEventListener('click', () => {
         if (trainerDrawCanvasEl.style.display !== 'none') {
             captureCanvasAsImage(trainerDrawCanvasEl, 'NCA_Train_Drawing');
-        } else if (trainerProgressImgEl.style.display !== 'none') {
-            captureCanvasAsImage(trainerProgressImgEl, 'NCA_Train_Progress');
+        } else if (trainerProgressCanvasEl.style.display !== 'none') { // MODIFIED
+            captureCanvasAsImage(trainerProgressCanvasEl, 'NCA_Train_Progress'); // MODIFIED
         }
     });
     takeScreenshotRunBtn.addEventListener('click', () => {
@@ -1182,8 +1339,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (trainingLoopActive) {
             if (trainerDrawCanvasEl.style.display !== 'none') {
                 startRecording(trainerDrawCanvasEl, 'Train_Drawing');
-            } else if (trainerProgressImgEl.style.display !== 'none') {
-                startRecording(trainerProgressImgEl, 'Train_Progress');
+            } else if (trainerProgressCanvasEl.style.display !== 'none') { // MODIFIED
+                startRecording(trainerProgressCanvasEl, 'Train_Progress'); // MODIFIED
             }
         } else {
             showGlobalStatus('Training loop must be active to record video.', false);
@@ -1202,9 +1359,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const placeholderDim = DRAW_CANVAS_WIDTH;
     const placeholderColor = '#f0f0f0';
-    const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='32' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`;
+    // const svgPlaceholder = (text) => `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${placeholderDim}' height='${placeholderDim}' viewBox='0 0 ${placeholderDim} ${placeholderDim}'%3E%3Crect width='100%25' height='100%25' fill='${placeholderColor}'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='32' fill='%236c757d'%3E${text}%3C/text%3E%3C/svg%3E`; // REMOVED
     
-    trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress');
+    // trainerProgressImgEl.src = svgPlaceholder('Target / Training Progress'); // REMOVED
 
     // Initial calls after DOM is ready and tab is set
     // updateTrainerControlsAvailability(); // Called by openTab

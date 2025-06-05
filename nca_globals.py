@@ -9,6 +9,7 @@ DEFAULT_BATCH_SIZE = 8
 DEFAULT_POOL_SIZE = 1024
 HISTORY_MAX_SIZE = 200
 DEFAULT_RUNNER_SLEEP_DURATION = 0.05
+RUNNER_SLEEP_DURATION_TRAINING_ACTIVE = 0.2 # Slower FPS when training is active (e.g., 5 FPS)
 
 # New for drawn patterns (client-side canvas size for drawing target)
 # This should match the display size of the drawing canvas on the trainer tab.
