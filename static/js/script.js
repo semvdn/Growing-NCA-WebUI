@@ -95,6 +95,8 @@ const takeScreenshotRunBtn = document.getElementById('takeScreenshotRunBtn');
 const startRecordingRunBtn = document.getElementById('startRecordingRunBtn');
 const stopRecordingRunBtn = document.getElementById('stopRecordingRunBtn');
 const recordingTimerRun = document.getElementById('recordingTimerRun');
+const whiteBackgroundTrainCheckbox = document.getElementById('whiteBackgroundTrainCheckbox');
+const whiteBackgroundRunCheckbox = document.getElementById('whiteBackgroundRunCheckbox');
 
 // --- State Variables ---
 let trainerInitialized = false;
@@ -172,32 +174,68 @@ function drawUpscaledPixels(targetCtx, targetWidth, targetHeight, rawPixels, raw
 
 // --- Capture Logic ---
 function captureCanvasAsImage(sourceElement, filenamePrefix) {
-    let canvasToCapture;
+    let canvasToProcess = sourceElement; // The canvas we will potentially draw a background on
+    let useWhiteBackground = false;
 
-    if (sourceElement.id === 'previewCanvasRun') {
-        // For the runner canvas, use the pre-rendered high-res capture canvas
-        canvasToCapture = highResCaptureCanvas;
-    } else {
-        // For other canvases (trainer), create a temporary canvas and draw
-        canvasToCapture = document.createElement('canvas');
-        let ctx = canvasToCapture.getContext('2d');
+    // Determine which checkbox to check based on the sourceElement's ID
+    if (sourceElement.id === 'trainerDrawCanvas' || sourceElement.id === 'trainerProgressCanvas') {
+        useWhiteBackground = whiteBackgroundTrainCheckbox.checked;
+    } else if (sourceElement.id === 'previewCanvasRun') {
+        useWhiteBackground = whiteBackgroundRunCheckbox.checked;
+    }
 
-        // Set canvas dimensions to match the source
-        canvasToCapture.width = sourceElement.naturalWidth || sourceElement.width;
-        canvasToCapture.height = sourceElement.naturalHeight || sourceElement.height;
+    // If a white background is requested, create a temporary canvas for processing
+    if (useWhiteBackground) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = sourceElement.naturalWidth || sourceElement.width;
+        tempCanvas.height = sourceElement.naturalHeight || sourceElement.height;
+        const tempCtx = tempCanvas.getContext('2d');
 
-        // Draw the image or canvas content onto the temporary canvas
+        // Fill with white background
+        tempCtx.fillStyle = 'white';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        // Draw the original source element onto this temporary canvas
         if (sourceElement.tagName === 'IMG') {
-            ctx.drawImage(sourceElement, 0, 0, canvasToCapture.width, canvasToCapture.height);
+            tempCtx.drawImage(sourceElement, 0, 0, tempCanvas.width, tempCanvas.height);
         } else if (sourceElement.tagName === 'CANVAS') {
-            ctx.drawImage(sourceElement, 0, 0);
+            // For canvas, if it's the runner preview, use the high-res capture canvas as source
+            if (sourceElement.id === 'previewCanvasRun') {
+                tempCtx.drawImage(highResCaptureCanvas, 0, 0, tempCanvas.width, tempCanvas.height);
+            } else {
+                tempCtx.drawImage(sourceElement, 0, 0);
+            }
         } else {
             console.error('Unsupported element for capture:', sourceElement);
             return;
         }
+        canvasToProcess = tempCanvas; // Use the temporary canvas for dataURL conversion
+    } else {
+        // If no white background, and it's the runner canvas, use the high-res capture canvas directly
+        if (sourceElement.id === 'previewCanvasRun') {
+            canvasToProcess = highResCaptureCanvas;
+        } else {
+            // For other canvases (trainer) without white background, create a temporary canvas and draw
+            canvasToProcess = document.createElement('canvas');
+            let ctx = canvasToProcess.getContext('2d');
+
+            // Set canvas dimensions to match the source
+            canvasToProcess.width = sourceElement.naturalWidth || sourceElement.width;
+            canvasToProcess.height = sourceElement.naturalHeight || sourceElement.height;
+
+            // Draw the image or canvas content onto the temporary canvas
+            if (sourceElement.tagName === 'IMG') {
+                ctx.drawImage(sourceElement, 0, 0, canvasToProcess.width, canvasToProcess.height);
+            } else if (sourceElement.tagName === 'CANVAS') {
+                ctx.drawImage(sourceElement, 0, 0);
+            } else {
+                console.error('Unsupported element for capture:', sourceElement);
+                return;
+            }
+        }
     }
 
-    const dataURL = canvasToCapture.toDataURL('image/png');
+    const dataURL = canvasToProcess.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = dataURL;
     a.download = `${filenamePrefix}_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.png`;
@@ -216,38 +254,111 @@ async function startRecording(canvasElement, tabName) {
 
     recordedChunks = [];
     let streamSourceCanvas = canvasElement;
-    if (canvasElement.id === 'previewCanvasRun') {
-        // For runner canvas, capture stream from the high-res capture canvas
-        streamSourceCanvas = highResCaptureCanvas;
+    let useWhiteBackground = false;
+
+    // Determine which checkbox to check based on the canvasElement's ID
+    if (canvasElement.id === 'trainerDrawCanvas' || canvasElement.id === 'trainerProgressCanvas') {
+        useWhiteBackground = whiteBackgroundTrainCheckbox.checked;
+    } else if (canvasElement.id === 'previewCanvasRun') {
+        useWhiteBackground = whiteBackgroundRunCheckbox.checked;
     }
-    const stream = streamSourceCanvas.captureStream(60); // Capture at 60 FPS
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
+
+    let stream;
+    if (useWhiteBackground) {
+        // Create a temporary canvas for drawing frames with a white background
+        const tempRecordingCanvas = document.createElement('canvas');
+        tempRecordingCanvas.width = canvasElement.naturalWidth || canvasElement.width;
+        tempRecordingCanvas.height = canvasElement.naturalHeight || canvasElement.height;
+        const tempRecordingCtx = tempRecordingCanvas.getContext('2d');
+
+        // Function to draw a frame with white background
+        const drawFrameWithWhiteBackground = () => {
+            tempRecordingCtx.fillStyle = 'white';
+            tempRecordingCtx.fillRect(0, 0, tempRecordingCanvas.width, tempRecordingCanvas.height);
+            
+            // Draw the original source element onto this temporary canvas
+            if (canvasElement.tagName === 'IMG') {
+                tempRecordingCtx.drawImage(canvasElement, 0, 0, tempRecordingCanvas.width, tempRecordingCanvas.height);
+            } else if (canvasElement.tagName === 'CANVAS') {
+                // For canvas, if it's the runner preview, use the high-res capture canvas as source
+                if (canvasElement.id === 'previewCanvasRun') {
+                    tempRecordingCtx.drawImage(highResCaptureCanvas, 0, 0, tempRecordingCanvas.width, tempRecordingCanvas.height);
+                } else {
+                    tempRecordingCtx.drawImage(canvasElement, 0, 0);
+                }
+            }
+        };
+
+        // Create a stream from the temporary canvas, drawing frames to it
+        stream = tempRecordingCanvas.captureStream(60); // Capture at 60 FPS
+        // Override the default draw function to include white background
+        const originalDraw = stream.getVideoTracks()[0].requestFrame; // This might not be the correct way to hook into frame drawing for MediaRecorder
+        
+        // A more robust way is to continuously draw to the temp canvas and capture its stream
+        let animationFrameId;
+        const captureLoop = () => {
+            drawFrameWithWhiteBackground();
+            animationFrameId = requestAnimationFrame(captureLoop);
+        };
+        animationFrameId = requestAnimationFrame(captureLoop); // Start the drawing loop
+
+        // When recording stops, stop the animation frame loop
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
+        mediaRecorder.onstop = async () => {
+            cancelAnimationFrame(animationFrameId); // Stop the drawing loop
+            showGlobalStatus('Saving video...', true);
+            const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
+            const outputFilename = `NCA_${tabName}_Recording_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.mp4`;
+
+            // Create download link
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(webmBlob);
+            a.download = outputFilename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href); // Clean up URL object
+
+            showGlobalStatus('Video recorded and downloaded!', true);
+            recordedChunks = [];
+            isRecording = false;
+            updateTrainerControlsAvailability(); // Re-enable buttons
+            updateRunnerControlsAvailability();
+        };
+
+    } else {
+        // Original logic: capture stream directly from the source canvas
+        if (canvasElement.id === 'previewCanvasRun') {
+            streamSourceCanvas = highResCaptureCanvas;
+        }
+        stream = streamSourceCanvas.captureStream(60); // Capture at 60 FPS
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
+        mediaRecorder.onstop = async () => {
+            showGlobalStatus('Saving video...', true);
+            const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
+            const outputFilename = `NCA_${tabName}_Recording_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.mp4`;
+
+            // Create download link
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(webmBlob);
+            a.download = outputFilename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href); // Clean up URL object
+
+            showGlobalStatus('Video recorded and downloaded!', true);
+            recordedChunks = [];
+            isRecording = false;
+            updateTrainerControlsAvailability(); // Re-enable buttons
+            updateRunnerControlsAvailability();
+        };
+    }
 
     mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
             recordedChunks.push(event.data);
         }
-    };
-
-    mediaRecorder.onstop = async () => {
-        showGlobalStatus('Saving video...', true);
-        const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
-        const outputFilename = `NCA_${tabName}_Recording_${new Date().toISOString().slice(0,19).replace(/[-T:]/g, '')}.mp4`;
-
-        // Create download link
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(webmBlob);
-        a.download = outputFilename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href); // Clean up URL object
-
-        showGlobalStatus('Video recorded and downloaded!', true);
-        recordedChunks = [];
-        isRecording = false;
-        updateTrainerControlsAvailability(); // Re-enable buttons
-        updateRunnerControlsAvailability();
     };
 
     mediaRecorder.start();
