@@ -41,6 +41,7 @@ trainer_target_source_kind = None # "file" or "drawn_defines_padded_grid"
 trainer_actual_target_shape = None # Shape of the final target used by trainer (e.g. (72,72,4))
 trainer_target_image_name = "unknown_image" # Stores the name of the image used for training target (file name or drawn name)
 trainer_target_image_loaded_or_drawn = "unknown" # "loaded" or "drawn"
+original_drawn_image_pil = None # New: Stores the original PIL Image of the drawn pattern before resizing/padding
 
 current_training_run_id = None # New: Unique ID for the current training session
 current_training_run_dir = None # New: Path to the dedicated directory for the current training session
@@ -110,7 +111,7 @@ def index_route():
 
 @app.route('/upload_drawn_pattern_target', methods=['POST'])
 def upload_drawn_pattern_target():
-    global trainer_target_image_rgba, trainer_actual_target_shape, trainer_target_source_kind, trainer_target_image_name, trainer_target_image_loaded_or_drawn
+    global trainer_target_image_rgba, trainer_actual_target_shape, trainer_target_source_kind, trainer_target_image_name, trainer_target_image_loaded_or_drawn, original_drawn_image_pil
     try:
         data = request.json
         data_url = data.get('image_data_url')
@@ -121,6 +122,7 @@ def upload_drawn_pattern_target():
         header, encoded = data_url.split(',', 1)
         image_data = base64.b64decode(encoded)
         img_pil = PIL.Image.open(io.BytesIO(image_data)).convert("RGBA")
+        original_drawn_image_pil = img_pil.copy() # Store the original full-scale image
 
         # For drawn patterns, they define the FINAL grid size the NCA operates on.
         # So, resize the drawn image (from DRAW_CANVAS_DISPLAY_SIZE) to this final grid size.
@@ -133,7 +135,7 @@ def upload_drawn_pattern_target():
              raise ValueError("Drawn image has zero dimension before resize.")
         
         # Fit into the (final_grid_dim_w, final_grid_dim_h) box, maintaining aspect ratio
-        # This means the drawing might not fill the entire box if it's not square, 
+        # This means the drawing might not fill the entire box if it's not square,
         # and will be padded with transparency.
         # Or, we can stretch it if that's preferred. Let's try fitting with padding.
         
@@ -276,6 +278,24 @@ def initialize_trainer_route():
             current_training_run_dir = os.path.join(app.config['MODEL_FOLDER'], current_training_run_id)
             os.makedirs(current_training_run_dir, exist_ok=True)
             tf.print(f"New training run directory created: {current_training_run_dir}")
+
+            # If the target image was drawn, save both the pixelated training target and the original full-scale canvas drawing
+            if trainer_target_image_loaded_or_drawn == "drawn" and trainer_target_image_rgba is not None:
+                # Save the pixelated training target
+                pixelated_image_filename = f"{secure_filename(trainer_target_image_name).replace('.', '_')}_pixelated_target.png"
+                pixelated_image_save_path = os.path.join(current_training_run_dir, pixelated_image_filename)
+                img_pil_pixelated = PIL.Image.fromarray((trainer_target_image_rgba * 255).astype(np.uint8))
+                img_pil_pixelated.save(pixelated_image_save_path)
+                tf.print(f"Pixelated training target image saved to {pixelated_image_save_path} during initialization.")
+
+                # Save the original full-scale canvas drawing
+                if original_drawn_image_pil is not None:
+                    original_drawn_filename = f"{secure_filename(trainer_target_image_name).replace('.', '_')}_original_drawing.png"
+                    original_drawn_save_path = os.path.join(current_training_run_dir, original_drawn_filename)
+                    original_drawn_image_pil.save(original_drawn_save_path)
+                    tf.print(f"Original full-scale drawn image saved to {original_drawn_save_path} during initialization.")
+                else:
+                    tf.print("Warning: original_drawn_image_pil was None, cannot save original full-scale drawing.")
 
             data = request.json
             config = {
@@ -494,18 +514,29 @@ def save_trainer_model_route():
         # If the image was drawn, save the final initialized image as a PNG in the run directory
         if trainer_target_image_loaded_or_drawn == "drawn" and trainer_target_image_rgba is not None:
             # Use the original image name for the drawn target file
-            drawn_image_filename = f"{secure_filename(trainer_target_image_name).replace('.', '_')}_initial_target.png"
-            drawn_image_save_path = os.path.join(model_save_base_path, drawn_image_filename)
+            pixelated_image_filename = f"{secure_filename(trainer_target_image_name).replace('.', '_')}_pixelated_target.png"
+            pixelated_image_save_path = os.path.join(model_save_base_path, pixelated_image_filename)
             
             # Convert RGBA numpy array to PIL Image and save
             img_pil_to_save = PIL.Image.fromarray((trainer_target_image_rgba * 255).astype(np.uint8))
-            img_pil_to_save.save(drawn_image_save_path)
-            tf.print(f"Drawn initial target image saved to {drawn_image_save_path}")
-            metadata["initial_target_image_file"] = drawn_image_filename # Add to metadata
-            # Re-save metadata with the new image file entry
+            img_pil_to_save.save(pixelated_image_save_path)
+            tf.print(f"Pixelated training target image saved to {pixelated_image_save_path}")
+            metadata["pixelated_target_image_file"] = pixelated_image_filename # Add to metadata
+
+            # Save the original full-scale canvas drawing if available
+            if original_drawn_image_pil is not None:
+                original_drawn_filename = f"{secure_filename(trainer_target_image_name).replace('.', '_')}_original_drawing.png"
+                original_drawn_save_path = os.path.join(model_save_base_path, original_drawn_filename)
+                original_drawn_image_pil.save(original_drawn_save_path)
+                tf.print(f"Original full-scale drawn image saved to {original_drawn_save_path}")
+                metadata["original_drawn_image_file"] = original_drawn_filename # Add to metadata
+            else:
+                tf.print("Warning: original_drawn_image_pil was None, cannot save original full-scale drawing during save_trainer_model.")
+
+            # Re-save metadata with the new image file entries
             with open(json_save_path, 'w') as f:
                 json.dump(metadata, f, indent=4)
-            tf.print(f"Metadata updated with initial target image path: {json_save_path}")
+            tf.print(f"Metadata updated with image paths: {json_save_path}")
 
 
         return jsonify({"success": True, "message": f"Checkpoint saved to '{current_training_run_id}' directory."})
@@ -564,23 +595,35 @@ def load_trainer_model_route():
                     # For drawn images, they are saved in the model's subdirectory
                     # Need to infer the model's subdirectory from the loaded model file path
                     model_dir_name = os.path.basename(os.path.dirname(model_file_path))
-                    drawn_image_filename_in_subdir = metadata.get("initial_target_image_file")
-                    if drawn_image_filename_in_subdir:
-                        drawn_image_path = os.path.join(app.config['MODEL_FOLDER'], model_dir_name, drawn_image_filename_in_subdir)
-                        if os.path.exists(drawn_image_path):
-                            with open(drawn_image_path, 'rb') as img_f:
-                                # For drawn images, they are already padded, so load as is
+                    pixelated_image_filename_in_subdir = metadata.get("pixelated_target_image_file")
+                    original_drawn_filename_in_subdir = metadata.get("original_drawn_image_file")
+
+                    if pixelated_image_filename_in_subdir:
+                        pixelated_image_path = os.path.join(app.config['MODEL_FOLDER'], model_dir_name, pixelated_image_filename_in_subdir)
+                        if os.path.exists(pixelated_image_path):
+                            with open(pixelated_image_path, 'rb') as img_f:
                                 img_pil = PIL.Image.open(img_f).convert("RGBA")
                                 loaded_target_rgba = np.float32(img_pil) / 255.0
                                 loaded_target_rgba[..., :3] *= loaded_target_rgba[..., 3:] # Apply alpha
                             trainer_target_source_kind = "drawn_defines_padded_grid"
                             trainer_target_image_name = target_image_name_from_meta
                             trainer_target_image_loaded_or_drawn = "drawn"
-                            tf.print(f"Trainer: Re-loaded drawn target image '{target_image_name_from_meta}' from model subdir.")
+                            tf.print(f"Trainer: Re-loaded pixelated target image '{target_image_name_from_meta}' from model subdir.")
                         else:
-                            tf.print(f"Trainer: Warning: Original drawn target image '{drawn_image_filename_in_subdir}' not found at {drawn_image_path}. Please set a new target.")
+                            tf.print(f"Trainer: Warning: Pixelated target image '{pixelated_image_filename_in_subdir}' not found at {pixelated_image_path}. Please set a new target.")
                     else:
-                        tf.print(f"Trainer: Warning: Metadata for drawn image '{target_image_name_from_meta}' missing 'initial_target_image_file'. Please set a new target.")
+                        tf.print(f"Trainer: Warning: Metadata for drawn image '{target_image_name_from_meta}' missing 'pixelated_target_image_file'. Please set a new target.")
+
+                    # Attempt to load the original full-scale drawn image if available
+                    if original_drawn_filename_in_subdir:
+                        original_drawn_path = os.path.join(app.config['MODEL_FOLDER'], model_dir_name, original_drawn_filename_in_subdir)
+                        if os.path.exists(original_drawn_path):
+                            with open(original_drawn_path, 'rb') as img_f:
+                                global original_drawn_image_pil
+                                original_drawn_image_pil = PIL.Image.open(img_f).convert("RGBA")
+                            tf.print(f"Trainer: Re-loaded original drawn image '{original_drawn_filename_in_subdir}' from model subdir.")
+                        else:
+                            tf.print(f"Trainer: Warning: Original drawn image '{original_drawn_filename_in_subdir}' not found at {original_drawn_path}.")
                 else:
                     tf.print(f"Trainer: Unknown image source kind '{image_source_kind_from_meta}' in metadata. Please set a new target.")
             else:
