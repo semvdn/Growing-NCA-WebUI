@@ -21,6 +21,8 @@ let isDrawingOnTrainerCanvas = false;
 let trainerCanvasHistory = [];
 let trainerCanvasHistoryPointer = -1;
 let isEraserModeTrain = false; // New state variable for eraser mode
+let lastX = -1; // To store the last X coordinate for continuous drawing
+let lastY = -1; // To store the last Y coordinate for continuous drawing
 
 // --- Runner Canvas & Interaction ---
 const previewCanvasRunEl = document.getElementById('previewCanvasRun'); // NEW
@@ -396,9 +398,8 @@ function clearTrainerDrawCanvas() {
     }
 }
 
-function drawOnTrainerCanvas(event, isDragging) {
-    if (!isDrawingOnTrainerCanvas && !isDragging) return;
-    if (!trainerCtx || trainingLoopActive) return;
+function drawOnTrainerCanvas(event) { // Removed isDragging parameter, not needed with new logic
+    if (!isDrawingOnTrainerCanvas || trainingLoopActive) return;
 
     const rect = trainerDrawCanvasEl.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -408,25 +409,42 @@ function drawOnTrainerCanvas(event, isDragging) {
     const brushOpacity = parseInt(trainBrushOpacitySlider.value) / 100;
     const color = trainDrawColorPicker.value;
 
-    // Apply opacity to the color or use clear for eraser mode
+    // Set global composite operation based on eraser mode
     if (isEraserModeTrain) {
-        trainerCtx.globalCompositeOperation = 'destination-out'; // This makes new drawings transparent
-        trainerCtx.fillStyle = `rgba(0,0,0, ${brushOpacity})`; // Color doesn't matter, only alpha
+        trainerCtx.globalCompositeOperation = 'destination-out'; // Erase mode
     } else {
-        trainerCtx.globalCompositeOperation = 'source-over'; // Default drawing mode
-        const hexToRgb = (hex) => {
-            const bigint = parseInt(hex.slice(1), 16);
-            const r = (bigint >> 16) & 255;
-            const g = (bigint >> 8) & 255;
-            const b = bigint & 255;
-            return `${r},${g},${b}`;
-        };
-        trainerCtx.fillStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`;
+        trainerCtx.globalCompositeOperation = 'source-over'; // Draw mode
     }
-    
-    trainerCtx.beginPath();
-    trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2);
-    trainerCtx.fill();
+
+    // Set brush style
+    trainerCtx.lineWidth = brushSize * 2; // Use brushSize as radius, so lineWidth is diameter
+    trainerCtx.lineCap = 'round';
+    trainerCtx.lineJoin = 'round';
+
+    const hexToRgb = (hex) => {
+        const bigint = parseInt(hex.slice(1), 16);
+        const r = (bigint >> 16) & 255;
+        const g = (bigint >> 8) & 255;
+        const b = bigint & 255;
+        return `${r},${g},${b}`;
+    };
+    trainerCtx.strokeStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`;
+    trainerCtx.fillStyle = `rgba(${hexToRgb(color)}, ${brushOpacity})`; // For initial dot
+
+    if (lastX === -1 || lastY === -1) { // First point of a new stroke
+        trainerCtx.beginPath();
+        trainerCtx.arc(x, y, brushSize, 0, Math.PI * 2); // Draw a dot for the initial click
+        trainerCtx.fill();
+    } else { // Subsequent points, draw a line segment
+        trainerCtx.beginPath();
+        trainerCtx.moveTo(lastX, lastY);
+        trainerCtx.lineTo(x, y);
+        trainerCtx.stroke();
+    }
+
+    // Update last coordinates for the next segment
+    lastX = x;
+    lastY = y;
 
     if (trainerTargetConfirmed) {
         trainingStatusDiv.textContent = "Status: Drawing modified. Confirm again to use as target.";
@@ -472,13 +490,17 @@ redoTrainCanvasBtn.addEventListener('click', () => {
 trainerDrawCanvasEl.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || trainingLoopActive) return;
     isDrawingOnTrainerCanvas = true;
-    drawOnTrainerCanvas(e, false);
+    // Set initial lastX, lastY for the first point of the stroke
+    const rect = trainerDrawCanvasEl.getBoundingClientRect();
+    lastX = e.clientX - rect.left;
+    lastY = e.clientY - rect.top;
+    drawOnTrainerCanvas(e); // Draw the first point (dot)
     e.preventDefault();
 });
 trainerDrawCanvasEl.addEventListener('mousemove', (e) => {
     if (trainingLoopActive) return;
     if (isDrawingOnTrainerCanvas) {
-        drawOnTrainerCanvas(e, true);
+        drawOnTrainerCanvas(e); // Draw continuous line segments
     }
     e.preventDefault();
 });
@@ -486,12 +508,16 @@ document.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return;
     if (isDrawingOnTrainerCanvas) {
         isDrawingOnTrainerCanvas = false;
+        lastX = -1; // Reset last coordinates
+        lastY = -1;
         saveTrainerCanvasState(); // Save state after drawing is complete
     }
 });
 trainerDrawCanvasEl.addEventListener('mouseleave', () => {
     if (isDrawingOnTrainerCanvas) {
         isDrawingOnTrainerCanvas = false;
+        lastX = -1; // Reset last coordinates
+        lastY = -1;
         saveTrainerCanvasState(); // Save state if mouse leaves while drawing
     }
 });
