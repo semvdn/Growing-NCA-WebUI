@@ -7,12 +7,18 @@ import numpy as np
 import time
 from nca_model import CAModel
 from nca_utils import SamplePool, make_circle_masks
-from nca_globals import CHANNEL_N, TARGET_PADDING # TARGET_PADDING needed for file-based padding
+from nca_globals import CHANNEL_N, TARGET_PADDING, DEFAULT_ENTROPY_ENABLED, DEFAULT_ENTROPY_STRENGTH
 
 class NCATrainer:
     def __init__(self, target_img_rgba_processed, config): # target_img_rgba_processed is already TARGET_SIZE for files, or (TARGET_SIZE + 2*PAD) for drawn
         self.config = config
-        self.ca = CAModel(channel_n=CHANNEL_N, fire_rate=config['fire_rate'])
+        
+        # Extract entropy settings from config, with defaults from nca_globals
+        enable_entropy = config.get('enable_entropy', DEFAULT_ENTROPY_ENABLED)
+        entropy_strength = config.get('entropy_strength', DEFAULT_ENTROPY_STRENGTH)
+
+        self.ca = CAModel(channel_n=CHANNEL_N, fire_rate=config['fire_rate'],
+                          enable_entropy=enable_entropy, entropy_strength=entropy_strength)
         
         self.run_dir = config.get('run_dir') # New: Store the run-specific directory
         target_source_kind = config.get('target_source_kind', 'file') # Default to file if not specified
@@ -76,7 +82,10 @@ class NCATrainer:
         with tf.GradientTape() as tape:
             x_intermediate = x_batch_tensor
             for _ in tf.range(iter_n):
-                x_intermediate = self.ca(x_intermediate, fire_rate=self.ca.fire_rate)
+                # Pass entropy settings to the CA model's call method
+                x_intermediate = self.ca(x_intermediate, fire_rate=self.ca.fire_rate,
+                                         enable_entropy=self.ca.enable_entropy,
+                                         entropy_strength=self.ca.entropy_strength)
             loss_val = tf.reduce_mean(self._loss_fn(x_intermediate))
         
         trainable_vars = self.ca.trainable_weights

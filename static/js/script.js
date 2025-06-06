@@ -81,6 +81,13 @@ const runBrushSizeValue = document.getElementById('runBrushSizeValue');
 const runFpsSlider = document.getElementById('runFpsSlider');
 const runFpsValue = document.getElementById('runFpsValue');
 
+const enableEntropyTrainCheckbox = document.getElementById('enableEntropyTrain');
+const entropyStrengthTrainSlider = document.getElementById('entropyStrengthTrain');
+const entropyStrengthValueTrain = document.getElementById('entropyStrengthValueTrain');
+const enableEntropyRunCheckbox = document.getElementById('enableEntropyRun');
+const entropyStrengthRunSlider = document.getElementById('entropyStrengthRun');
+const entropyStrengthValueRun = document.getElementById('entropyStrengthValueRun');
+
 const runStatusDiv = document.getElementById('runStatus');
 const runModelParamsText = document.getElementById('runModelParamsText');
 const globalStatusMessageEl = document.getElementById('globalStatusMessage');
@@ -418,6 +425,9 @@ function updateTrainerControlsAvailability() {
     loadCurrentTrainingModelBtnRun.disabled = !trainerInitialized || trainingLoopActive;
     loadTrainerModelBtn.disabled = trainingLoopActive; // New: Disable if training is active
 
+    enableEntropyTrainCheckbox.disabled = trainingLoopActive;
+    entropyStrengthTrainSlider.disabled = trainingLoopActive || !enableEntropyTrainCheckbox.checked;
+
     // Capture Tools
     const isTrainCanvasVisible = trainerDrawCanvasEl.style.display !== 'none';
     const isTrainProgressCanvasVisible = trainerProgressCanvasEl.style.display !== 'none'; // NEW
@@ -439,6 +449,9 @@ function updateRunnerControlsAvailability() {
     runToolModeDrawRadio.disabled = !runnerModelLoaded;
     runDrawColorPicker.disabled = !runnerModelLoaded || currentRunToolMode !== 'draw';
     runFpsSlider.disabled = !runnerModelLoaded;
+
+    enableEntropyRunCheckbox.disabled = !runnerModelLoaded;
+    entropyStrengthRunSlider.disabled = !runnerModelLoaded || !enableEntropyRunCheckbox.checked;
 
     if (runnerModelLoaded) {
         previewCanvasRunEl.classList.toggle('erase-mode', currentRunToolMode === 'erase');
@@ -812,6 +825,8 @@ initTrainerBtn.addEventListener('click', async () => {
         damage_n: parseInt(damageNInputTrain.value),
         batch_size: parseInt(batchSizeInputTrain.value),
         pool_size: parseInt(poolSizeInputTrain.value),
+        enable_entropy: enableEntropyTrainCheckbox.checked,
+        entropy_strength: parseFloat(entropyStrengthTrainSlider.value)
     };
     const response = await postRequest('/initialize_trainer', payload);
     showGlobalStatus(response.message, response.success);
@@ -925,7 +940,18 @@ loadTrainerModelBtn.addEventListener('click', async () => {
         trainModelParamsText.textContent = response.model_summary || 'N/A';
         trainingStatusDiv.textContent = "Status: Trainer model loaded. Ready to continue training.";
         // Optionally, update other UI elements based on loaded metadata if needed
-        // e.g., experimentTypeSelectTrain.value = response.metadata.experiment_type;
+        if (response.metadata) {
+            experimentTypeSelectTrain.value = response.metadata.experiment_type || 'Growing';
+            fireRateInputTrain.value = response.metadata.fire_rate !== undefined ? response.metadata.fire_rate : 0.5;
+            damageNInputTrain.value = response.metadata.damage_n !== undefined ? response.metadata.damage_n : 3;
+            batchSizeInputTrain.value = response.metadata.batch_size !== undefined ? response.metadata.batch_size : 8;
+            poolSizeInputTrain.value = response.metadata.pool_size !== undefined ? response.metadata.pool_size : 1024;
+            enableEntropyTrainCheckbox.checked = response.metadata.enable_entropy !== undefined ? response.metadata.enable_entropy : false;
+            entropyStrengthTrainSlider.value = response.metadata.entropy_strength !== undefined ? response.metadata.entropy_strength : 0.0;
+            entropyStrengthValueTrain.textContent = parseFloat(entropyStrengthTrainSlider.value).toFixed(3);
+            entropyStrengthTrainSlider.disabled = !enableEntropyTrainCheckbox.checked;
+            experimentTypeSelectTrain.dispatchEvent(new Event('change')); // Trigger to update damageN visibility
+        }
     } else {
         trainerInitialized = false;
         trainingStatusDiv.textContent = "Status: Failed to load trainer model.";
@@ -1070,6 +1096,25 @@ runFpsSlider.addEventListener('input', async () => {
 runToolModeEraseRadio.addEventListener('change', () => { if (runToolModeEraseRadio.checked) currentRunToolMode = 'erase'; updateRunnerControlsAvailability(); });
 runToolModeDrawRadio.addEventListener('change', () => { if (runToolModeDrawRadio.checked) currentRunToolMode = 'draw'; updateRunnerControlsAvailability(); });
 
+// Entropy controls for Runner
+enableEntropyRunCheckbox.addEventListener('change', async () => {
+    entropyStrengthRunSlider.disabled = !enableEntropyRunCheckbox.checked;
+    updateRunnerControlsAvailability(); // To update other related controls if needed
+    // Send update to backend immediately
+    await postRequest('/set_runner_entropy', {
+        enable_entropy: enableEntropyRunCheckbox.checked,
+        entropy_strength: parseFloat(entropyStrengthRunSlider.value)
+    });
+});
+entropyStrengthRunSlider.addEventListener('input', async () => {
+    entropyStrengthValueRun.textContent = parseFloat(entropyStrengthRunSlider.value).toFixed(3);
+    // Send update to backend immediately
+    await postRequest('/set_runner_entropy', {
+        enable_entropy: enableEntropyRunCheckbox.checked,
+        entropy_strength: parseFloat(entropyStrengthRunSlider.value)
+    });
+});
+
 loadCurrentTrainingModelBtnRun.addEventListener('click', async () => {
     if (!trainerInitialized) {
         showGlobalStatus("Trainer model not available (trainer not initialized).", false); return;
@@ -1087,7 +1132,13 @@ loadCurrentTrainingModelBtnRun.addEventListener('click', async () => {
              runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(50, 1000 / initialFps)); 
         }
         runStatusDiv.textContent = "Status: Runner: Loaded current training model. FPS: " + initialFps;
-        runFpsSlider.dispatchEvent(new Event('input')); 
+        runFpsSlider.dispatchEvent(new Event('input'));
+        if (response.metadata) {
+            enableEntropyRunCheckbox.checked = response.metadata.enable_entropy !== undefined ? response.metadata.enable_entropy : false;
+            entropyStrengthRunSlider.value = response.metadata.entropy_strength !== undefined ? response.metadata.entropy_strength : 0.0;
+            entropyStrengthValueRun.textContent = parseFloat(entropyStrengthRunSlider.value).toFixed(3);
+            entropyStrengthRunSlider.disabled = !enableEntropyRunCheckbox.checked;
+        }
     }
     updateRunnerControlsAvailability();
 });
@@ -1116,6 +1167,12 @@ loadModelBtnRun.addEventListener('click', async () => {
         }
         runStatusDiv.textContent = "Status: Runner: Model loaded. FPS: " + initialFps;
         runFpsSlider.dispatchEvent(new Event('input'));
+        if (response.metadata) {
+            enableEntropyRunCheckbox.checked = response.metadata.enable_entropy !== undefined ? response.metadata.enable_entropy : false;
+            entropyStrengthRunSlider.value = response.metadata.entropy_strength !== undefined ? response.metadata.entropy_strength : 0.0;
+            entropyStrengthValueRun.textContent = parseFloat(entropyStrengthRunSlider.value).toFixed(3);
+            entropyStrengthRunSlider.disabled = !enableEntropyRunCheckbox.checked;
+        }
     } else {
         runnerModelLoaded = false;
     }
@@ -1374,6 +1431,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     trainBrushOpacitySlider.addEventListener('input', () => {
         trainBrushOpacityValue.textContent = trainBrushOpacitySlider.value + '%';
+    });
+
+    enableEntropyTrainCheckbox.addEventListener('change', () => {
+        entropyStrengthTrainSlider.disabled = !enableEntropyTrainCheckbox.checked;
+        updateTrainerControlsAvailability();
+    });
+
+    entropyStrengthTrainSlider.addEventListener('input', () => {
+        entropyStrengthValueTrain.textContent = parseFloat(entropyStrengthTrainSlider.value).toFixed(3);
     });
 
     const trainEraserModeCheckbox = document.getElementById('trainEraserModeCheckbox');

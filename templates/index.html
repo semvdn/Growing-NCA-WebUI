@@ -173,6 +173,15 @@
                         <input type="number" id="batchSizeTrain" value="8" step="1" min="1">
                         <label for="poolSizeTrain">Pool Size:</label>
                         <input type="number" id="poolSizeTrain" value="1024" step="64" min="1">
+                        <hr style="margin: 15px 0;">
+                        <label style="margin-top: 10px;">
+                            <input type="checkbox" id="enableEntropyTrain"> Enable Entropy (Noise)
+                        </label>
+                        <div style="margin-top: 5px;">
+                            <label for="entropyStrengthTrain">Entropy Strength:</label>
+                            <input type="range" id="entropyStrengthTrain" min="0.0" max="0.1" step="0.001" value="0.0" disabled>
+                            <span id="entropyStrengthValueTrain">0.000</span>
+                        </div>
                     </div>
                 </fieldset>
                 
@@ -245,6 +254,15 @@
                         <label for="runFpsSlider">Target FPS:</label>
                         <input type="range" id="runFpsSlider" min="1" max="60" value="20" disabled>
                         <span id="runFpsValue">20</span> FPS
+                        <hr style="margin: 15px 0;">
+                        <label style="margin-top: 10px;">
+                            <input type="checkbox" id="enableEntropyRun"> Enable Entropy (Noise)
+                        </label>
+                        <div style="margin-top: 5px;">
+                            <label for="entropyStrengthRun">Entropy Strength:</label>
+                            <input type="range" id="entropyStrengthRun" min="0.0" max="0.1" step="0.001" value="0.0" disabled>
+                            <span id="entropyStrengthValueRun">0.000</span>
+                        </div>
                     </div>
                 </fieldset>
 

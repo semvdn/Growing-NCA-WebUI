@@ -5,12 +5,17 @@ import numpy as np
 import tensorflow as tf
 import threading
 import time
-from nca_globals import CHANNEL_N, HISTORY_MAX_SIZE
+from nca_globals import CHANNEL_N, HISTORY_MAX_SIZE, DEFAULT_ENTROPY_ENABLED, DEFAULT_ENTROPY_STRENGTH
 
 class NCARunner:
-    def __init__(self, ca_model_instance, initial_state_shape_tuple):
-        self.ca = ca_model_instance 
-        self._state_lock = threading.Lock() 
+    def __init__(self, ca_model_instance, initial_state_shape_tuple,
+                 enable_entropy=DEFAULT_ENTROPY_ENABLED,
+                 entropy_strength=DEFAULT_ENTROPY_STRENGTH):
+        self.ca = ca_model_instance
+        self._state_lock = threading.Lock()
+
+        self.enable_entropy = enable_entropy
+        self.entropy_strength = entropy_strength
 
         if len(initial_state_shape_tuple) == 3 and all(isinstance(dim, int) and dim > 0 for dim in initial_state_shape_tuple):
             self.h, self.w, self.ch = initial_state_shape_tuple
@@ -53,7 +58,9 @@ class NCARunner:
             
             try:
                 x_tensor_batch = tf.convert_to_tensor(self.current_state[None, ...], dtype=tf.float32)
-                x_new_batch = self.ca(x_tensor_batch, fire_rate=self.ca.fire_rate) 
+                x_new_batch = self.ca(x_tensor_batch, fire_rate=self.ca.fire_rate,
+                                     enable_entropy=self.enable_entropy,
+                                     entropy_strength=self.entropy_strength)
                 self.current_state = x_new_batch[0].numpy()
 
                 if self.history_index < len(self.history) - 1:
@@ -182,3 +189,10 @@ class NCARunner:
     def get_current_state_for_display(self):
         with self._state_lock:
             return self.current_state.copy() if self.current_state is not None else None
+
+    def set_entropy_settings(self, enable_entropy, entropy_strength):
+        """Dynamically updates the entropy settings for the runner."""
+        with self._state_lock:
+            self.enable_entropy = enable_entropy
+            self.entropy_strength = entropy_strength
+            tf.print(f"NCARunner: Entropy settings updated: enabled={self.enable_entropy}, strength={self.entropy_strength:.3f}")

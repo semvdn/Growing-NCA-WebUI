@@ -4,15 +4,19 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Conv2D
 import numpy as np
-from nca_globals import CHANNEL_N
-from nca_utils import get_living_mask 
+from nca_globals import CHANNEL_N, DEFAULT_ENTROPY_ENABLED, DEFAULT_ENTROPY_STRENGTH
+from nca_utils import get_living_mask
 
 class CAModel(tf.keras.Model):
     """The core Cellular Automata Model."""
-    def __init__(self, channel_n=CHANNEL_N, fire_rate=0.5):
+    def __init__(self, channel_n=CHANNEL_N, fire_rate=0.5,
+                 enable_entropy=DEFAULT_ENTROPY_ENABLED,
+                 entropy_strength=DEFAULT_ENTROPY_STRENGTH):
         super().__init__()
         self.channel_n = channel_n
         self.fire_rate = fire_rate
+        self.enable_entropy = enable_entropy
+        self.entropy_strength = entropy_strength
 
         self.dmodel = tf.keras.Sequential([
             Conv2D(128, 1, activation=tf.nn.relu),
@@ -43,11 +47,20 @@ class CAModel(tf.keras.Model):
         return y
 
     @tf.function
-    def call(self, x, fire_rate=None, angle=0.0, step_size=1.0):
+    def call(self, x, fire_rate=None, angle=0.0, step_size=1.0,
+             enable_entropy=None, entropy_strength=None):
         """Forward pass of the CA. Expects x to have self.channel_n channels."""
         # Input x should be [B, H, W, self.channel_n]
-        
-        pre_life_mask = get_living_mask(x) 
+
+        current_enable_entropy = enable_entropy if enable_entropy is not None else self.enable_entropy
+        current_entropy_strength = entropy_strength if entropy_strength is not None else self.entropy_strength
+
+        if current_enable_entropy and current_entropy_strength > 0:
+            # Add Gaussian noise to the input state
+            noise = tf.random.normal(shape=tf.shape(x), stddev=current_entropy_strength)
+            x += noise
+
+        pre_life_mask = get_living_mask(x)
 
         y = self.perceive(x, angle) # perceive is designed for x with self.channel_n
         dx_update = self.dmodel(y) * step_size # dmodel outputs self.channel_n channels

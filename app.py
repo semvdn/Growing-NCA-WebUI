@@ -16,8 +16,9 @@ import base64
 
 from nca_globals import (TARGET_SIZE, TARGET_PADDING, DEFAULT_FIRE_RATE,
                          DEFAULT_BATCH_SIZE, DEFAULT_POOL_SIZE, CHANNEL_N,
-                         DEFAULT_RUNNER_SLEEP_DURATION, RUNNER_SLEEP_DURATION_TRAINING_ACTIVE, # New import
-                         DRAW_CANVAS_DISPLAY_SIZE)
+                         DEFAULT_RUNNER_SLEEP_DURATION, RUNNER_SLEEP_DURATION_TRAINING_ACTIVE,
+                         DRAW_CANVAS_DISPLAY_SIZE,
+                         DEFAULT_ENTROPY_ENABLED, DEFAULT_ENTROPY_STRENGTH) # New imports
 from nca_utils import load_image_from_file, np2pil, to_rgb, get_model_summary, format_training_time # load_emoji removed
 from nca_model import CAModel
 from nca_trainer import NCATrainer
@@ -307,7 +308,9 @@ def initialize_trainer_route():
                 "learning_rate": float(data.get("learning_rate", 2e-3)),
                 "target_source_kind": trainer_target_source_kind, # Pass the source kind
                 "model_folder_path": app.config['MODEL_FOLDER'], # Pass the general model folder path
-                "run_dir": current_training_run_dir # New: Pass the specific run directory
+                "run_dir": current_training_run_dir, # New: Pass the specific run directory
+                "enable_entropy": bool(data.get("enable_entropy", DEFAULT_ENTROPY_ENABLED)), # New: Entropy setting
+                "entropy_strength": float(data.get("entropy_strength", DEFAULT_ENTROPY_STRENGTH)) # New: Entropy strength
             }
             if config["experiment_type"] == "Regenerating":
                 config["damage_n"] = int(data.get("damage_n", 3))
@@ -505,7 +508,9 @@ def save_trainer_model_route():
             "total_training_time_seconds": float(current_nca_trainer.get_status()["training_time_seconds"]), # Convert float32 to Python float
             "save_timestamp": time.time(),
             "save_datetime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-            "run_id": current_training_run_id # New: Add run ID to metadata
+            "run_id": current_training_run_id, # New: Add run ID to metadata
+            "enable_entropy": current_nca_trainer.ca.enable_entropy, # New: Save entropy settings
+            "entropy_strength": current_nca_trainer.ca.entropy_strength # New: Save entropy settings
         }
         with open(json_save_path, 'w') as f:
             json.dump(metadata, f, indent=4)
@@ -643,7 +648,9 @@ def load_trainer_model_route():
                 "target_padding": TARGET_PADDING,
                 "learning_rate": float(metadata.get("learning_rate", 2e-3)),
                 "target_source_kind": trainer_target_source_kind,
-                "model_folder_path": app.config['MODEL_FOLDER']
+                "model_folder_path": app.config['MODEL_FOLDER'],
+                "enable_entropy": bool(metadata.get("enable_entropy", DEFAULT_ENTROPY_ENABLED)), # New: Load entropy setting
+                "entropy_strength": float(metadata.get("entropy_strength", DEFAULT_ENTROPY_STRENGTH)) # New: Load entropy strength
             }
             if config["experiment_type"] == "Regenerating":
                 config["damage_n"] = int(metadata.get("damage_n", 3))
@@ -734,14 +741,25 @@ def load_current_training_model_for_runner_route():
         current_nca_runner = None
         try:
             initial_runner_shape = (runner_h, runner_w, CHANNEL_N) # Use determined H, W
+            
+            # Pass entropy settings from the trainer's model to the runner
+            runner_enable_entropy = current_nca_trainer.ca.enable_entropy if current_nca_trainer else DEFAULT_ENTROPY_ENABLED
+            runner_entropy_strength = current_nca_trainer.ca.entropy_strength if current_nca_trainer else DEFAULT_ENTROPY_STRENGTH
+
             current_nca_runner = NCARunner(ca_model_instance=model_to_load,
-                                           initial_state_shape_tuple=initial_runner_shape)
+                                           initial_state_shape_tuple=initial_runner_shape,
+                                           enable_entropy=runner_enable_entropy,
+                                           entropy_strength=runner_entropy_strength)
             runner_sleep_duration = DEFAULT_RUNNER_SLEEP_DURATION
 
             model_summary_str = get_model_summary(current_nca_runner.ca)
             return jsonify({
                 "success": True, "message": message, "model_summary": model_summary_str,
-                "runner_preview_url": "/get_live_runner_preview"
+                "runner_preview_url": "/get_live_runner_preview",
+                "metadata": { # Include metadata for frontend to update UI
+                    "enable_entropy": runner_enable_entropy,
+                    "entropy_strength": runner_entropy_strength
+                }
             })
         except Exception as e_detail:
             tf.print(f"Error setting up runner with training model: {e_detail}\n{traceback.format_exc()}")
@@ -807,8 +825,15 @@ def load_model_for_runner_route():
             else: message += f" Grid based on default ({initial_runner_h}x{initial_runner_w})."
 
             initial_runner_shape_to_use = (initial_runner_h, initial_runner_w, CHANNEL_N)
+            
+            # Pass entropy settings from loaded metadata to the runner
+            runner_enable_entropy = bool(metadata.get("enable_entropy", DEFAULT_ENTROPY_ENABLED))
+            runner_entropy_strength = float(metadata.get("entropy_strength", DEFAULT_ENTROPY_STRENGTH))
+
             current_nca_runner = NCARunner(ca_model_instance=loaded_ca_model_for_runner,
-                                           initial_state_shape_tuple=initial_runner_shape_to_use)
+                                           initial_state_shape_tuple=initial_runner_shape_to_use,
+                                           enable_entropy=runner_enable_entropy,
+                                           entropy_strength=runner_entropy_strength)
             runner_sleep_duration = DEFAULT_RUNNER_SLEEP_DURATION
             model_summary_str = get_model_summary(current_nca_runner.ca)
 
@@ -816,7 +841,11 @@ def load_model_for_runner_route():
             response_data = {
                 "success": True, "message": message, "model_summary": model_summary_str,
                 "runner_preview_url": "/get_live_runner_preview",
-                "metadata": metadata # Include metadata here
+                "metadata": { # Include metadata here, ensuring entropy settings are present
+                    **metadata, # Spread existing metadata
+                    "enable_entropy": runner_enable_entropy,
+                    "entropy_strength": runner_entropy_strength
+                }
             }
             return jsonify(response_data)
         except Exception as e:
@@ -912,6 +941,25 @@ def get_live_runner_preview_route():
         if preview_state_to_show is not None: 
             state_h = preview_state_to_show.shape[0] # Runner's actual state height
             if state_h > 0: zoom = DRAW_CANVAS_DISPLAY_SIZE // state_h
+    return get_preview_image_response(preview_state_to_show, zoom_factor=max(1, zoom),
+                                      default_width_px=default_w, default_height_px=default_h)
+
+@app.route('/set_runner_entropy', methods=['POST'])
+def set_runner_entropy_route():
+    global current_nca_runner
+    if not current_nca_runner:
+        return jsonify({"success": False, "message": "Runner not initialized."}), 400
+    try:
+        data = request.json
+        enable_entropy = bool(data.get('enable_entropy', DEFAULT_ENTROPY_ENABLED))
+        entropy_strength = float(data.get('entropy_strength', DEFAULT_ENTROPY_STRENGTH))
+        
+        current_nca_runner.set_entropy_settings(enable_entropy, entropy_strength)
+        return jsonify({"success": True, "message": "Runner entropy settings updated."})
+    except Exception as e:
+        tf.print(f"Error setting runner entropy: {e}\n{traceback.format_exc()}")
+        return jsonify({"success": False, "message": f"Error setting runner entropy: {str(e)}"}), 500
+
 @app.route('/get_live_runner_raw_preview_data')
 def get_live_runner_raw_preview_data_route():
     preview_state_to_show = None
