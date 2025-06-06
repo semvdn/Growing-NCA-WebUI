@@ -177,18 +177,16 @@ def load_target_from_file_route():
         filename = secure_filename(file.filename)
         trainer_target_image_name = filename # Store the filename for metadata
         trainer_target_image_loaded_or_drawn = "loaded" # Indicate it was loaded
-        # load_image_from_file resizes to TARGET_SIZE content area
-        trainer_target_image_rgba = load_image_from_file(file.stream, max_size=TARGET_SIZE)
+        # load_image_from_file now resizes directly to the full grid size
+        full_grid_dim = TARGET_SIZE + 2 * TARGET_PADDING
+        trainer_target_image_rgba = load_image_from_file(file.stream, target_dim=full_grid_dim)
         trainer_target_source_kind = "file"
-        message = f"Trainer Target: File '{filename}' loaded as content."
+        message = f"Trainer Target: File '{filename}' loaded as full grid."
 
-        # For file targets, trainer_actual_target_shape will be after NCATrainer pads it.
-        # We can store the content shape here for reference.
-        # trainer_actual_target_shape will be set in initialize_trainer for files.
-        # For now, just indicate success.
+        # For file targets, trainer_actual_target_shape is now the full grid size.
+        trainer_actual_target_shape = trainer_target_image_rgba.shape
 
-        tf.print(f"Trainer target from FILE loaded, content shape {trainer_target_image_rgba.shape}")
-        # The height/width returned here should be of the *content* for files.
+        tf.print(f"Trainer target from FILE loaded, full grid shape {trainer_target_image_rgba.shape}")
         return jsonify({"success": True, "message": message,
                         "target_height": trainer_target_image_rgba.shape[0],
                         "target_width": trainer_target_image_rgba.shape[1]})
@@ -206,10 +204,8 @@ def get_trainer_target_raw_preview_data_route():
             preview_image_data = trainer_target_image_rgba # Already final size
             grid_h, grid_w = preview_image_data.shape[0], preview_image_data.shape[1]
         elif trainer_target_source_kind == "file":
-            # For files, preview the content padded as the trainer would
-            p = TARGET_PADDING
-            padded_content = tf.pad(trainer_target_image_rgba, [(p,p),(p,p),(0,0)]).numpy()
-            preview_image_data = padded_content
+            # For files, the image is now loaded directly to the full grid size, no extra padding needed
+            preview_image_data = trainer_target_image_rgba
             grid_h, grid_w = preview_image_data.shape[0], preview_image_data.shape[1]
         # else: preview_image_data remains None
 
@@ -250,10 +246,8 @@ def get_trainer_target_preview_route():
                 zoom = DRAW_CANVAS_DISPLAY_SIZE // preview_image_data.shape[0]
 
         elif trainer_target_source_kind == "file":
-            # For files, preview the content padded as the trainer would
-            p = TARGET_PADDING
-            padded_content = tf.pad(trainer_target_image_rgba, [(p,p),(p,p),(0,0)]).numpy()
-            preview_image_data = padded_content
+            # For files, the image is now loaded directly to the full grid size, no extra padding needed
+            preview_image_data = trainer_target_image_rgba
             if preview_image_data.shape[0] > 0:
                 zoom = DRAW_CANVAS_DISPLAY_SIZE // preview_image_data.shape[0]
         else: # No target yet or unknown kind
@@ -589,7 +583,8 @@ def load_trainer_model_route():
                     target_image_path = os.path.join(app.config['UPLOAD_FOLDER'], target_image_name_from_meta)
                     if os.path.exists(target_image_path):
                         with open(target_image_path, 'rb') as img_f:
-                            loaded_target_rgba = load_image_from_file(img_f, max_size=TARGET_SIZE)
+                            full_grid_dim = TARGET_SIZE + 2 * TARGET_PADDING
+                            loaded_target_rgba = load_image_from_file(img_f, target_dim=full_grid_dim)
                         trainer_target_source_kind = "file"
                         trainer_target_image_name = target_image_name_from_meta
                         trainer_target_image_loaded_or_drawn = "loaded"

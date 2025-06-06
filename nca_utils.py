@@ -68,25 +68,23 @@ def load_image_from_url(url, max_size=64):
     img_np[..., :3] *= img_np[..., 3:] 
     return img_np
 
-def load_image_from_file(file_stream, max_size=64):
+def load_image_from_file(file_stream, target_dim=64):
     """
-    Load an image from a file stream, resize it, pad to square, and return as float32.
+    Load an image from a file stream and resize it to the target_dim x target_dim.
+    The image will be stretched/shrunk to fit the target dimensions, no padding.
+    Returns as float32 RGBA.
     """
     img = PIL.Image.open(file_stream).convert("RGBA")
 
     original_size = img.size
     if original_size[0] == 0 or original_size[1] == 0:
         raise ValueError("Loaded image has zero dimension.")
-    ratio = min(max_size / original_size[0], max_size / original_size[1])
-    new_size = (max(1, int(original_size[0] * ratio)), max(1, int(original_size[1] * ratio)))
-    img = img.resize(new_size, RESAMPLING_METHOD)
-
-    square_img = PIL.Image.new("RGBA", (max_size, max_size), (0, 0, 0, 0))
-    upper_left = ((max_size - new_size[0]) // 2, (max_size - new_size[1]) // 2)
-    square_img.paste(img, upper_left)
     
-    img_np = np.float32(square_img) / 255.0
-    img_np[..., :3] *= img_np[..., 3:] 
+    # Resize directly to target_dim x target_dim, stretching if aspect ratio differs
+    img_resized = img.resize((target_dim, target_dim), RESAMPLING_METHOD)
+    
+    img_np = np.float32(img_resized) / 255.0
+    img_np[..., :3] *= img_np[..., 3:]
     return img_np
 
 

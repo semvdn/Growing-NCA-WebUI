@@ -36,11 +36,9 @@ class NCATrainer:
             self.pad_target = tf.convert_to_tensor(target_img_rgba_processed, dtype=tf.float32)
             tf.print(f"NCATrainer: Using pre-sized drawn target. Shape: {self.pad_target.shape}")
         else: # Default for "file" source or unspecified
-            # For file-loaded patterns, target_img_rgba_processed is TARGET_SIZE x TARGET_SIZE content
-            pad_amount = config.get('target_padding', TARGET_PADDING) # Use configured padding
-            self.pad_target = tf.pad(target_img_rgba_processed, 
-                                     [(pad_amount, pad_amount)]*2 + [(0,0)])
-            tf.print(f"NCATrainer: Padded file target. Original content shape: {target_img_rgba_processed.shape}, Padded shape: {self.pad_target.shape}")
+            # For file-loaded patterns, target_img_rgba_processed is already the final padded size (TARGET_SIZE + 2*TARGET_PADDING)
+            self.pad_target = tf.convert_to_tensor(target_img_rgba_processed, dtype=tf.float32)
+            tf.print(f"NCATrainer: Using pre-sized file target. Shape: {self.pad_target.shape}")
         
         self.pool = self._initialize_pool() 
         self.loss_log = []
