@@ -1,7 +1,7 @@
 # nca_trainer.py
 """NCA Training Logic."""
 
-import os # Added for path operations
+import os
 import tensorflow as tf
 import numpy as np
 import time
@@ -10,21 +10,19 @@ from nca_utils import SamplePool, make_circle_masks
 from nca_globals import CHANNEL_N, TARGET_PADDING, DEFAULT_ENTROPY_ENABLED, DEFAULT_ENTROPY_STRENGTH
 
 class NCATrainer:
-    def __init__(self, target_img_rgba_processed, config): # target_img_rgba_processed is already TARGET_SIZE for files, or (TARGET_SIZE + 2*PAD) for drawn
+    def __init__(self, target_img_rgba_processed, config):
         self.config = config
         
-        # Extract entropy settings from config, with defaults from nca_globals
         enable_entropy = config.get('enable_entropy', DEFAULT_ENTROPY_ENABLED)
         entropy_strength = config.get('entropy_strength', DEFAULT_ENTROPY_STRENGTH)
 
         self.ca = CAModel(channel_n=CHANNEL_N, fire_rate=config['fire_rate'],
                           enable_entropy=enable_entropy, entropy_strength=entropy_strength)
         
-        self.run_dir = config.get('run_dir') # New: Store the run-specific directory
-        target_source_kind = config.get('target_source_kind', 'file') # Default to file if not specified
+        self.run_dir = config.get('run_dir')
+        target_source_kind = config.get('target_source_kind', 'file')
 
-        self.best_loss = float('inf') # Initialize best loss tracking
-        # Save best model within the run_dir if available, otherwise to the general model folder
+        self.best_loss = float('inf')
         if self.run_dir:
             self.best_model_save_path = os.path.join(self.run_dir, "best_model.weights.h5")
         else:
@@ -32,55 +30,47 @@ class NCATrainer:
         tf.print(f"NCATrainer: Best model will be saved to {self.best_model_save_path}")
 
         if target_source_kind == "drawn_defines_padded_grid":
-            # For drawn patterns, target_img_rgba_processed is already the final padded size
             self.pad_target = tf.convert_to_tensor(target_img_rgba_processed, dtype=tf.float32)
             tf.print(f"NCATrainer: Using pre-sized drawn target. Shape: {self.pad_target.shape}")
-        else: # Default for "file" source or unspecified
-            # For file-loaded patterns, target_img_rgba_processed is already the final padded size (TARGET_SIZE + 2*TARGET_PADDING)
+        else:
             self.pad_target = tf.convert_to_tensor(target_img_rgba_processed, dtype=tf.float32)
             tf.print(f"NCATrainer: Using pre-sized file target. Shape: {self.pad_target.shape}")
         
-        self.pool = self._initialize_pool() 
+        # Keep a single seed state for re-injection during training
+        h_grid, w_grid = self.pad_target.shape[:2]
+        self.seed_state = np.zeros([h_grid, w_grid, CHANNEL_N], np.float32)
+        if h_grid > 0 and w_grid > 0:
+            self.seed_state[h_grid // 2, w_grid // 2, 3:] = 1.0
+
+        self.pool = self._initialize_pool()
         self.loss_log = []
         self.current_step = 0
         self.training_start_time = None
         self.last_preview_state = None
         self.last_loss = None
-        self.total_training_time_paused = 0.0 # New: Accumulates time spent paused
-        self.last_pause_time = None # New: Timestamp when training was last paused
-        self.total_training_time_paused = 0.0 # New: Accumulates time spent paused
-        self.last_pause_time = None # New: Timestamp when training was last paused
+        self.total_training_time_paused = 0.0
+        self.last_pause_time = None
 
         lr = self.config.get('learning_rate', 2e-3)
         lr_sched = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-            [2000], [lr, lr * 0.1] 
+            [2000], [lr, lr * 0.1]
         )
         self.optimizer = tf.keras.optimizers.Adam(lr_sched)
 
     def _initialize_pool(self):
-        # Pool initialization should use the shape of self.pad_target
-        # as this is the actual grid size the CA operates on.
-        h_grid, w_grid = self.pad_target.shape[:2]
-        seed = np.zeros([h_grid, w_grid, CHANNEL_N], np.float32)
-        # Seed in the center of the *actual operational grid*
-        if h_grid > 0 and w_grid > 0:
-            seed[h_grid // 2, w_grid // 2, 3:] = 1.0  
-        
-        pool_s = self.config.get('pool_size', 1024) # Get pool_size from config
-        initial_states = np.repeat(seed[None, ...], pool_s, axis=0)
-        return SamplePool(x=initial_states) 
+        pool_s = self.config.get('pool_size', 1024)
+        initial_states = np.repeat(self.seed_state[None, ...], pool_s, axis=0)
+        return SamplePool(x=initial_states)
 
     def _loss_fn(self, x_state):
-        # Loss is always calculated against self.pad_target
         return tf.reduce_mean(tf.square(x_state[..., :4] - self.pad_target), axis=[1, 2, 3])
 
     @tf.function
-    def _train_step_tf(self, x_batch_tensor): 
-        iter_n = tf.random.uniform([], 64, 96, dtype=tf.int32) 
+    def _train_step_tf(self, x_batch_tensor):
+        iter_n = tf.random.uniform([], 64, 96, dtype=tf.int32)
         with tf.GradientTape() as tape:
             x_intermediate = x_batch_tensor
             for _ in tf.range(iter_n):
-                # Pass entropy settings to the CA model's call method
                 x_intermediate = self.ca(x_intermediate, fire_rate=self.ca.fire_rate,
                                          enable_entropy=self.ca.enable_entropy,
                                          entropy_strength=self.ca.entropy_strength)
@@ -99,52 +89,70 @@ class NCATrainer:
             self.optimizer.apply_gradients(valid_grads_and_vars)
         return x_intermediate, loss_val
 
-    def run_training_step(self): 
-        if not self.pool or len(self.pool) == 0:
-            return None, None 
-
+    def run_training_step(self):
         if self.training_start_time is None:
             self.training_start_time = time.time()
 
-        num_to_sample = self.config['batch_size']
-        sampled_indices = self.pool.get_indices(num_to_sample)
+        batch_size = self.config['batch_size']
+        experiment_type = self.config.get('experiment_type', 'Growing')
 
-        if sampled_indices.size == 0 :
-             return None, None 
+        # --- CORRECTED BATCH PREPARATION LOGIC ---
+        if experiment_type == "Growing":
+            # For "Growing" experiments, always start from a fresh seed.
+            x0_batch = np.repeat(self.seed_state[None, ...], batch_size, axis=0)
+            sampled_indices = None # Not sampling from the pool
+        else: # For "Persistent" and "Regenerating" experiments
+            if not self.pool or len(self.pool) == 0:
+                return None, None
 
-        x0_from_pool_batch = self.pool.x[sampled_indices].copy() 
-        
-        damage_n_config = self.config.get('damage_n', 0)
-        if damage_n_config > 0 and x0_from_pool_batch.shape[0] > 0: 
-            # Damage should be applied to the pad_target dimensions
-            h_grid_for_damage, w_grid_for_damage = self.pad_target.shape[:2]
-            num_to_damage_actual = min(damage_n_config, x0_from_pool_batch.shape[0]) 
+            sampled_indices = self.pool.get_indices(batch_size)
+            if sampled_indices.size == 0:
+                return None, None
             
-            if num_to_damage_actual > 0:
-                damage_masks_np = make_circle_masks(num_to_damage_actual, h_grid_for_damage, w_grid_for_damage).numpy()[..., None]
-                x0_from_pool_batch[-num_to_damage_actual:] *= (1.0 - damage_masks_np)
+            x0_batch = self.pool.x[sampled_indices].copy()
 
-        if x0_from_pool_batch.shape[0] == 0: 
+            # Calculate loss for the batch and sort by loss (highest first)
+            loss_ranks = self._loss_fn(tf.convert_to_tensor(x0_batch)).numpy().argsort()[::-1]
+            x0_batch = x0_batch[loss_ranks]
+            sampled_indices = sampled_indices[loss_ranks] # Reorder indices to match
+
+            # Replace the worst-performing sample with a fresh seed
+            x0_batch[0] = self.seed_state
+
+            # Apply damage to the best-performing samples if regenerating
+            damage_n_config = self.config.get('damage_n', 0)
+            if damage_n_config > 0 and x0_batch.shape[0] > 0:
+                h_grid, w_grid = self.pad_target.shape[:2]
+                num_to_damage = min(damage_n_config, x0_batch.shape[0])
+                if num_to_damage > 0:
+                    damage_masks = make_circle_masks(num_to_damage, h_grid, w_grid).numpy()[..., None]
+                    # Damage the lowest-loss samples (which are at the end of the sorted batch)
+                    x0_batch[-num_to_damage:] *= (1.0 - damage_masks)
+
+        if x0_batch.shape[0] == 0:
             return None, None
 
-        x_updated_batch_tf, loss_tf = self._train_step_tf(tf.convert_to_tensor(x0_from_pool_batch))
+        x_updated_batch, loss = self._train_step_tf(tf.convert_to_tensor(x0_batch))
         
-        self.pool.x[sampled_indices] = x_updated_batch_tf.numpy()
+        # If we used the pool, commit the updated states back
+        if sampled_indices is not None and experiment_type != "Growing":
+            self.pool.x[sampled_indices] = x_updated_batch.numpy()
 
         self.current_step += 1
-        self.last_loss = loss_tf.numpy()
+        self.last_loss = loss.numpy()
         self.loss_log.append(self.last_loss)
-        self.last_preview_state = x_updated_batch_tf[0].numpy().copy()
+        self.last_preview_state = x_updated_batch[0].numpy().copy()
         
-        self._save_best_model_if_improved() # Call the new method here
+        self._save_best_model_if_improved()
 
         return self.last_preview_state, self.last_loss
+        
+    # --- The rest of the class remains the same ---
 
     def _save_best_model_if_improved(self):
         if self.last_loss is None or self.current_step == 0:
             return
 
-        # Check every 100 steps
         if self.current_step % 100 == 0:
             if self.last_loss < self.best_loss:
                 tf.print(f"NCATrainer: New best loss found at step {self.current_step}: {self.last_loss:.4f} (previous best: {self.best_loss:.4f}). Saving model.")
@@ -154,22 +162,18 @@ class NCATrainer:
                     tf.print(f"NCATrainer: Best model weights saved to {self.best_model_save_path}")
                 except Exception as e:
                     tf.print(f"NCATrainer: Error saving best model weights: {e}")
-            # else:
-                # tf.print(f"NCATrainer: Current loss {self.last_loss:.4f} not better than best {self.best_loss:.4f} at step {self.current_step}.")
 
     def pause_training_timer(self):
-        """Pauses the training timer, accumulating elapsed time."""
         if self.training_start_time and self.last_pause_time is None:
             self.last_pause_time = time.time()
             tf.print(f"NCATrainer: Training timer paused at step {self.current_step}.")
 
     def resume_training_timer(self):
-        """Resumes the training timer, accounting for paused time."""
         if self.training_start_time and self.last_pause_time is not None:
             self.total_training_time_paused += (time.time() - self.last_pause_time)
             self.last_pause_time = None
             tf.print(f"NCATrainer: Training timer resumed. Total paused time: {self.total_training_time_paused:.2f}s")
-        elif self.training_start_time is None: # First start
+        elif self.training_start_time is None:
             self.training_start_time = time.time()
             tf.print("NCATrainer: Training timer started for the first time.")
 
@@ -177,10 +181,10 @@ class NCATrainer:
         elapsed_time_val = 0
         if self.training_start_time:
             current_active_time = time.time()
-            if self.last_pause_time is not None: # If currently paused, use the pause time as the "current" time
+            if self.last_pause_time is not None:
                 current_active_time = self.last_pause_time
             elapsed_time_val = (current_active_time - self.training_start_time) - self.total_training_time_paused
-            if elapsed_time_val < 0: # Prevent negative time if clock skews or very short intervals
+            if elapsed_time_val < 0:
                 elapsed_time_val = 0
 
         current_loss_val = self.last_loss if self.last_loss is not None else 0.0
@@ -195,7 +199,7 @@ class NCATrainer:
             "step": self.current_step,
             "loss": f"{current_loss_val:.4f}",
             "log_loss": log_loss_val_str,
-            "training_time_seconds": elapsed_time_val, # Raw seconds
+            "training_time_seconds": elapsed_time_val,
         }
 
     def get_model(self):
