@@ -24,7 +24,8 @@ from flask.wrappers import Response
 from werkzeug.utils import secure_filename
 
 import app_state
-from app_utils import ensure_trainer_stopped, export_model_for_tfjs
+from app_utils import ensure_trainer_stopped
+from model_converter import export_to_tfjs_format, export_to_webgl_format
 from nca_globals import (DEFAULT_BATCH_SIZE, DEFAULT_ENTROPY_ENABLED,
                          DEFAULT_ENTROPY_STRENGTH, DEFAULT_FIRE_RATE,
                          DEFAULT_POOL_SIZE, TARGET_PADDING, TARGET_SIZE)
@@ -87,12 +88,10 @@ def load_target_from_file_route() -> Response:
         file = request.files['image_file']
         filename = secure_filename(file.filename)
         
-        # Save the uploaded file to the general uploads folder
         file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], filename))
 
         full_grid_dim = TARGET_SIZE + 2 * TARGET_PADDING
         
-        # Reload from the saved path to ensure consistency
         with open(os.path.join(current_app.config['UPLOAD_FOLDER'], filename), 'rb') as f_stream:
             loaded_rgba = load_image_from_file(f_stream, target_dim=full_grid_dim)
 
@@ -280,7 +279,7 @@ def get_live_trainer_raw_preview_data_route() -> Response:
 
 @trainer_bp.route('/save_trainer_model', methods=['POST'])
 def save_trainer_model_route() -> Response:
-    """Saves the trainer's model weights, metadata, and a TF.js graph model."""
+    """Saves the model weights, metadata, and JS-runnable model formats."""
     if not app_state.current_nca_trainer or not app_state.current_training_run_dir:
         return jsonify({"success": False, "message": "No active training run to save."}), 400
 
@@ -293,13 +292,17 @@ def save_trainer_model_route() -> Response:
         weights_filename = f"{checkpoint_name}.weights.h5"
         metadata_filename = f"{checkpoint_name}.json"
         tfjs_filename = f"{checkpoint_name}.tfjs.json"
+        webgl_filename = f"{checkpoint_name}.webgl.json"
 
         weights_path = os.path.join(run_dir, weights_filename)
         metadata_path = os.path.join(run_dir, metadata_filename)
         tfjs_path = os.path.join(run_dir, tfjs_filename)
+        webgl_path = os.path.join(run_dir, webgl_filename)
 
         metadata = {
-            "model_weights_file": weights_filename, "tfjs_graph_file": tfjs_filename,
+            "model_weights_file": weights_filename,
+            "tfjs_model_file": tfjs_filename,
+            "webgl_model_file": webgl_filename,
             "trained_on_image": app_state.trainer_target_image_name,
             "image_source_kind": app_state.trainer_target_image_loaded_or_drawn,
             "training_steps": step,
@@ -314,14 +317,28 @@ def save_trainer_model_route() -> Response:
         }
 
     try:
+        # Save Keras weights
         ca_model.save_weights(weights_path)
         tf.print(f"Trainer model weights saved to {weights_path}")
+
+        # Save metadata
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=4)
         tf.print(f"Custom metadata saved to {metadata_path}")
-        export_model_for_tfjs(ca_model, tfjs_path)
+        
+        # Export and save TF.js model
+        tfjs_model_dict = export_to_tfjs_format(ca_model)
+        with open(tfjs_path, 'w') as f:
+            json.dump(tfjs_model_dict, f)
         tf.print(f"TensorFlow.js model graph saved to {tfjs_path}")
-        return jsonify({"success": True, "message": f"Checkpoint saved to '{app_state.current_training_run_id}'."})
+
+        # Export and save WebGL model
+        webgl_model_list = export_to_webgl_format(ca_model)
+        with open(webgl_path, 'w') as f:
+            json.dump(webgl_model_list, f)
+        tf.print(f"WebGL quantized model saved to {webgl_path}")
+
+        return jsonify({"success": True, "message": f"Checkpoint and JS models saved to '{app_state.current_training_run_id}'."})
     except Exception as e:
         tf.print(f"Error during model saving: {e}\n{traceback.format_exc()}")
         return jsonify({"success": False, "message": f"Error saving model artifacts: {e}"}), 500
@@ -394,13 +411,6 @@ def load_trainer_model_route() -> Response:
         if not file.filename.endswith(".weights.h5"):
             return jsonify({"success": False, "message": "Invalid file type. Must be .weights.h5"}), 400
 
-        # The model file determines its run directory
-        run_dir = os.path.join(current_app.config['MODEL_FOLDER'], secure_filename(os.path.dirname(file.filename)))
-        model_path = os.path.join(run_dir, secure_filename(os.path.basename(file.filename)))
-        
-        # Save the file to its potential run directory (or a temp location if needed)
-        # For simplicity, we assume the user uploads into the 'models' root or a run dir.
-        # A more robust solution might handle temporary uploads differently.
         temp_model_path = os.path.join(current_app.config['MODEL_FOLDER'], secure_filename(file.filename))
         file.save(temp_model_path)
 
@@ -446,7 +456,7 @@ def load_trainer_model_route() -> Response:
             return jsonify({
                 "success": True, "message": f"Model '{file.filename}' loaded.",
                 "model_summary": model_summary_str,
-                "metadata": metadata # Send metadata to frontend to restore UI state
+                "metadata": metadata
             })
 
         except Exception as e:

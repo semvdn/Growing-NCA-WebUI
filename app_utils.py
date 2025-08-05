@@ -2,13 +2,10 @@
 """
 Utility functions for the Flask web application.
 
-Contains helpers for generating image responses, managing threads,
-and exporting models for TensorFlow.js.
+Contains helpers for generating image responses and managing threads.
 """
 import io
-import json
 import time
-import traceback
 from typing import Optional
 
 import numpy as np
@@ -16,13 +13,9 @@ import PIL.Image
 import tensorflow as tf
 from flask import send_file
 from flask.wrappers import Response
-from google.protobuf.json_format import MessageToDict
-from tensorflow.python.framework.convert_to_constants import \
-    convert_variables_to_constants_v2
 
 import app_state
 from nca_globals import CHANNEL_N
-from nca_model import CAModel
 from nca_utils import np2pil, to_rgb
 
 
@@ -77,26 +70,3 @@ def ensure_runner_stopped() -> None:
             tf.print("Warning: Running thread did not stop in time.")
         app_state.running_thread = None
     app_state.stop_running_event.clear()
-
-
-def export_model_for_tfjs(ca_model: CAModel, save_path: str) -> None:
-    """Exports a CA model to a TensorFlow.js compatible JSON format."""
-    concrete_func = ca_model.call.get_concrete_function(
-        x=tf.TensorSpec([None, None, None, CHANNEL_N]),
-        fire_rate=tf.constant(0.5),
-        angle=tf.constant(0.0),
-        step_size=tf.constant(1.0),
-        enable_entropy=tf.constant(False),
-        entropy_strength=tf.constant(0.0)
-    )
-    constant_func = convert_variables_to_constants_v2(concrete_func)
-    graph_def = constant_func.graph.as_graph_def()
-    graph_json = MessageToDict(graph_def)
-    graph_json['versions'] = dict(producer='1.14', minConsumer='1.14')
-    model_json = {
-        'format': 'graph-model',
-        'modelTopology': graph_json,
-        'weightsManifest': [],
-    }
-    with open(save_path, 'w') as f:
-        json.dump(model_json, f)

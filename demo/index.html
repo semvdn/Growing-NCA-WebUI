@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural CA Interactive Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+            color: #1c1e21;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2rem;
+            padding: 2rem;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .controls, .display {
+            background-color: #ffffff;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border: 1px solid #dddfe2;
+        }
+        .controls {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .display {
+            text-align: center;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        h2 {
+            font-size: 1.2rem;
+            color: #606770;
+            margin-top: 0;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 0.5rem;
+        }
+        p {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            color: #606770;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #000;
+            image-rendering: pixelated;
+            cursor: crosshair;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        select, input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background-color: #1877f2;
+            color: white;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #166fe5;
+        }
+        button:disabled {
+            background-color: #e4e6eb;
+            color: #bcc0c4;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 1rem;
+            padding: 10px;
+            background-color: #e7f3ff;
+            border: 1px solid #1877f2;
+            color: #1877f2;
+            border-radius: 4px;
+            font-weight: 500;
+            text-align: center;
+        }
+        .status-error {
+            background-color: #fbe3e4 !important;
+            border-color: #e4262f !important;
+            color: #e4262f !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <h1>NCA Demo</h1>
+            <p>Load and interact with trained Neural Cellular Automata models. Click and drag on the canvas to "damage" the pattern.</p>
+            
+            <div class="control-group">
+                <label for="model-select">Select a Pre-configured Model:</label>
+                <select id="model-select"></select>
+            </div>
+            
+            <div class="control-group">
+                <label for="model-file">Or Upload Your Own (.tfjs.json):</label>
+                <input type="file" id="model-file" accept=".json">
+            </div>
+
+            <div class="control-group">
+                <button id="start-stop-btn" disabled>Load a Model</button>
+                <button id="reset-btn" disabled>Reset State</button>
+            </div>
+
+            <div id="status">Select a model to begin.</div>
+        </div>
+
+        <div class="display">
+            <h2>Live Simulation</h2>
+            <canvas id="main-canvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        "use strict";
+
+        // --- CONFIGURATION ---
+        const MODELS = [
+            // Add your hosted models here. 
+            // The URL must be a direct link to the raw .tfjs.json file.
+            // Example for a GitHub repo:
+            {
+                name: "Growing Lizard (Example)",
+                url: "https://raw.githubusercontent.com/user/repo/main/models/lizard.tfjs.json"
+            },
+            {
+                name: "Regenerating Butterfly (Example)",
+                url: "https://raw.githubusercontent.com/user/repo/main/models/butterfly.tfjs.json"
+            }
+        ];
+
+        // --- GLOBAL VARIABLES & CONSTANTS ---
+        const CANVAS_SIZE = 96;
+        const RENDER_SCALE = 5;
+        const CHANNEL_N = 16;
+        let model = null;
+        let state = null;
+        let isAnimating = false;
+        let isDragging = false;
+        
+        // DOM Elements
+        const canvas = document.getElementById('main-canvas');
+        const ctx = canvas.getContext('2d');
+        const modelSelect = document.getElementById('model-select');
+        const modelFileInput = document.getElementById('model-file');
+        const startStopBtn = document.getElementById('start-stop-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const statusEl = document.getElementById('status');
+        
+        // --- CORE APPLICATION LOGIC ---
+
+        /**
+         * Initializes the application, populates the model dropdown, and sets up event listeners.
+         */
+        function init() {
+            canvas.width = CANVAS_SIZE;
+            canvas.height = CANVAS_SIZE;
+            canvas.style.width = `${CANVAS_SIZE * RENDER_SCALE}px`;
+            canvas.style.height = `${CANVAS_SIZE * RENDER_SCALE}px`;
+
+            // Populate model dropdown
+            MODELS.forEach(m => {
+                const option = document.createElement('option');
+                option.value = m.url;
+                option.textContent = m.name;
+                modelSelect.appendChild(option);
+            });
+
+            // Set up event listeners
+            modelSelect.addEventListener('change', () => loadModelFromURL(modelSelect.value));
+            modelFileInput.addEventListener('change', handleFileUpload);
+            startStopBtn.addEventListener('click', toggleAnimation);
+            resetBtn.addEventListener('click', resetState);
+
+            canvas.addEventListener('mousedown', e => { 
+                isDragging = true; 
+                handleCanvasInteraction(e); 
+            });
+            canvas.addEventListener('mousemove', e => {
+                if (isDragging) handleCanvasInteraction(e);
+            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+
+            // Load the first model by default if it exists
+            if (MODELS.length > 0) {
+                loadModelFromURL(MODELS[0].url);
+            }
+        }
+
+        /**
+         * Loads a model from a given URL.
+         * @param {string} url - The URL to the .tfjs.json model file.
+         */
+        async function loadModelFromURL(url) {
+            if (!url.includes('http')) {
+                updateStatus('Example model not configured. Please upload your own model or update the URLs in the script.', true);
+                return;
+            }
+            updateStatus('Loading model from URL...');
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const modelJSON = await response.json();
+                await loadModel(modelJSON);
+            } catch (error) {
+                updateStatus(`Error loading model from URL: ${error.message}`, true);
+            }
+        }
+
+        /**
+         * Handles the user selecting a local model file.
+         */
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            updateStatus('Loading model from file...');
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const modelJSON = JSON.parse(e.target.result);
+                    await loadModel(modelJSON);
+                } catch (error) {
+                    updateStatus(`Error parsing model file: ${error.message}`, true);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        /**
+         * Parses and loads the TensorFlow.js GraphModel.
+         * This includes a workaround for loading constants, adapted from the original Colab notebook.
+         * @param {object} modelJSON - The parsed JSON object of the model.
+         */
+        async function loadModel(modelJSON) {
+            stopAnimation();
+            const modelURL = URL.createObjectURL(new Blob([JSON.stringify(modelJSON)], {type: 'application/json'}));
+            
+            try {
+                const loadedModel = await tf.loadGraphModel(modelURL);
+                const consts = parseConstants(modelJSON);
+                Object.assign(loadedModel.weights, consts);
+                model = loadedModel;
+
+                resetState();
+                updateStatus('Model loaded successfully! Click "Start".', false);
+                startStopBtn.disabled = false;
+                startStopBtn.textContent = 'Start';
+                resetBtn.disabled = false;
+            } catch (error) {
+                updateStatus(`Failed to load graph model: ${error.message}`, true);
+            } finally {
+                URL.revokeObjectURL(modelURL);
+            }
+        }
+
+        /**
+         * Extracts constant tensors from the model graph definition.
+         * This is necessary because tf.loadGraphModel may not handle all constants correctly.
+         */
+        function parseConstants(modelGraph) {
+            const dtypes = {'DT_INT32':['int32', 'intVal', Int32Array], 'DT_FLOAT':['float32', 'floatVal', Float32Array]};
+            const consts = {};
+
+            modelGraph.modelTopology.node.filter(n => n.op === 'Const').forEach(node => {
+                const v = node.attr.value.tensor;
+                if (!v.dtype) return;
+                const [dtype, field, arrayType] = dtypes[v.dtype];
+                
+                if (!v.tensorShape || !v.tensorShape.dim) {
+                    consts[node.name] = [tf.scalar(v[field][0], dtype)];
+                } else {
+                    const shape = v.tensorShape.dim.map(d => (!d.size) ? 0 : parseInt(d.size));
+                    let arr;
+                    if (v.tensorContent) {
+                        const data = atob(v.tensorContent);
+                        const buf = new Uint8Array(data.length);
+                        for (let i = 0; i < data.length; ++i) {
+                            buf[i] = data.charCodeAt(i);
+                        }
+                        arr = new arrayType(buf.buffer);
+                    } else {
+                        const size = shape.reduce((a, b) => a * b, 1);
+                        arr = new arrayType(size);
+                        if (size > 0) arr.fill(v[field][0]);
+                    }
+                    consts[node.name] = [tf.tensor(arr, shape, dtype)];
+                }
+            });
+            return consts;
+        }
+
+        /**
+         * Resets the simulation state to a single seed in the center.
+         */
+        function resetState() {
+            if (state) state.dispose();
+            state = tf.tidy(() => {
+                const seed = tf.zeros([1, 1, 1, CHANNEL_N]);
+                const livingCell = tf.tensor([0, 0, 0, 1]).reshape([1,1,1,4]);
+                const hiddenState = tf.ones([1,1,1,CHANNEL_N-4]);
+                const fullCell = tf.concat([livingCell, hiddenState], 3);
+
+                const center = Math.floor(CANVAS_SIZE / 2);
+                const p = center -1;
+                return tf.concat([seed, fullCell], 1)
+                         .pad([[0, 0], [p, CANVAS_SIZE - p - 1], [p, CANVAS_SIZE - p - 1], [0, 0]]);
+            });
+            state = tf.variable(state);
+            render();
+        }
+
+        /**
+         * Toggles the animation loop on and off.
+         */
+        function toggleAnimation() {
+            isAnimating = !isAnimating;
+            if (isAnimating) {
+                startStopBtn.textContent = 'Stop';
+                render();
+            } else {
+                startStopBtn.textContent = 'Start';
+            }
+        }
+
+        function stopAnimation() {
+            isAnimating = false;
+            if(startStopBtn) startStopBtn.textContent = 'Start';
+        }
+
+        /**
+         * The main animation loop.
+         */
+        function render() {
+            if (isAnimating) {
+                tf.tidy(() => {
+                    // Execute the model to get the next state
+                    const newState = model.execute({
+                        x: state,
+                        fire_rate: tf.tensor(0.5),
+                        angle: tf.tensor(0.0),
+                        step_size: tf.tensor(1.0)
+                    }, ['Identity']);
+                    state.assign(newState);
+                });
+            }
+
+            // Render the current state to the canvas
+            tf.tidy(() => {
+                const rgba = state.slice([0, 0, 0, 0], [1, -1, -1, 4]).squeeze();
+                const alpha = state.slice([0, 0, 0, 3], [1, -1, -1, 1]).squeeze();
+                const rgb = state.slice([0, 0, 0, 0], [1, -1, -1, 3]).squeeze();
+                
+                // Final color = (1.0 - alpha) + rgb (premultiplied alpha)
+                const displayTensor = tf.scalar(1.0).sub(alpha).add(rgb).mul(255);
+                
+                const rgbaBytes = new Uint8ClampedArray(displayTensor.dataSync());
+                const imageData = new ImageData(rgbaBytes, CANVAS_SIZE, CANVAS_SIZE);
+                ctx.putImageData(imageData, 0, 0);
+            });
+
+            if (isAnimating) {
+                requestAnimationFrame(render);
+            }
+        }
+        
+        /**
+         * Handles mouse interaction on the canvas to "damage" the state.
+         */
+        function handleCanvasInteraction(event) {
+            if (!state) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((event.clientX - rect.left) / RENDER_SCALE);
+            const y = Math.floor((event.clientY - rect.top) / RENDER_SCALE);
+            const r = 8; // Damage radius
+
+            tf.tidy(() => {
+                const rx = tf.range(0, CANVAS_SIZE).sub(x).div(r).square().expandDims(0);
+                const ry = tf.range(0, CANVAS_SIZE).sub(y).div(r).square().expandDims(1);
+                const mask = rx.add(ry).greater(1.0).expandDims(0).expandDims(3);
+                state.assign(state.mul(mask));
+            });
+            
+            // If not animating, render a single frame to show the damage
+            if (!isAnimating) {
+                render();
+            }
+        }
+
+        /**
+         * Updates the status message shown to the user.
+         * @param {string} text - The message to display.
+         * @param {boolean} isError - If true, styles the message as an error.
+         */
+        function updateStatus(text, isError = false) {
+            statusEl.textContent = text;
+            if (isError) {
+                statusEl.classList.add('status-error');
+            } else {
+                statusEl.classList.remove('status-error');
+            }
+        }
+
+        // --- START THE APP ---
+        document.addEventListener('DOMContentLoaded', init);
+
+    </script>
+</body>
+</html>
