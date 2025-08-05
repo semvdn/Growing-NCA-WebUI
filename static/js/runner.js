@@ -28,7 +28,10 @@ async function handleRunnerAction(action, params = {}) {
     } else {
          if (action !== 'modify_area') showGlobalStatus(response.message, true);
     }
-    fetchRunnerStatus(); // Refresh status and preview after action
+    // Refresh status and preview after any action, especially non-looping ones
+    if (!runnerLoopActive) {
+        fetchRunnerStatus();
+    }
 }
 
 function performCanvasAction(event) {
@@ -41,7 +44,6 @@ function performCanvasAction(event) {
     if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
         if (isInteractingWithRunCanvas) {
             isInteractingWithRunCanvas = false;
-            lastXRun = -1; lastYRun = -1;
         }
         return;
     }
@@ -51,7 +53,7 @@ function performCanvasAction(event) {
     const normX = Math.max(0, Math.min(1, x / rect.width));
     const normY = Math.max(0, Math.min(1, y / rect.height));
     const normBrushFactor = (brushSize / 30) * 0.20 + 0.01;
-    
+
     handleRunnerAction('modify_area', {
         tool_mode: currentRunToolMode,
         draw_color_hex: drawColor,
@@ -61,12 +63,7 @@ function performCanvasAction(event) {
 }
 
 async function fetchRunnerStatus() {
-    if (currentOpenTab !== 'RunTab') return;
-    if (!runnerModelLoaded) {
-        if (runningStatusIntervalId) {
-            clearInterval(runningStatusIntervalId);
-            runningStatusIntervalId = null;
-        }
+    if (currentOpenTab !== 'RunTab' || !runnerModelLoaded) {
         return;
     }
 
@@ -75,11 +72,15 @@ async function fetchRunnerStatus() {
         if (!response.ok) {
             runStatusDiv.textContent = `Runner status error: ${response.status}`;
             runnerLoopActive = false;
+            if (runningStatusIntervalId) {
+                clearInterval(runningStatusIntervalId);
+                runningStatusIntervalId = null;
+            }
             updateRunnerControlsAvailability();
             return;
         }
         const data = await response.json();
-        
+
         const targetFPSDisplay = data.current_fps === "Max" ? "Max" : parseFloat(data.current_fps).toFixed(1);
         const actualFPSDisplay = data.actual_fps || "N/A";
         runStatusDiv.textContent = `${data.status_message || 'Status unavailable'} (Target: ${targetFPSDisplay} FPS, Actual: ${actualFPSDisplay} FPS)`;
@@ -92,18 +93,16 @@ async function fetchRunnerStatus() {
                 recordingStartTime = Date.now();
                 startRecordingTimer('Run');
             } else if (!runnerLoopActive && prevRunnerLoopActive) {
-                clearInterval(recordingTimerIntervalId);
+                if(recordingTimerIntervalId) clearInterval(recordingTimerIntervalId);
                 pausedRecordingDuration += (Date.now() - recordingStartTime);
             }
         }
         
-        if (runningStatusIntervalId) {
-            clearInterval(runningStatusIntervalId);
-            let newIntervalTime = runnerLoopActive ? Math.max(33, 1000 / (parseFloat(data.current_fps) || 20)) : 1000;
-            runningStatusIntervalId = setInterval(fetchRunnerStatus, newIntervalTime);
-        }
+        // MODIFIED: This function no longer manages its own timer.
+        // It's controlled by the start/stop buttons.
 
-        if (runnerModelLoaded && (!isInteractingWithRunCanvas || data.is_loop_active)) {
+        // Fetch the raw pixel data for the preview canvas
+        if (!isInteractingWithRunCanvas || runnerLoopActive) {
             const rawPreviewResponse = await fetch(`/get_live_runner_raw_preview_data?t=${new Date().getTime()}`);
             if (rawPreviewResponse.ok) {
                 const rawData = await rawPreviewResponse.json();
@@ -122,15 +121,16 @@ async function fetchRunnerStatus() {
     } catch (error) {
         runStatusDiv.textContent = `Runner status fetch error: ${error}.`;
         runnerLoopActive = false;
-        if (runningStatusIntervalId) clearInterval(runningStatusIntervalId);
-        runningStatusIntervalId = null;
+        if (runningStatusIntervalId) {
+            clearInterval(runningStatusIntervalId);
+            runningStatusIntervalId = null;
+        }
         updateRunnerControlsAvailability();
     }
 }
 
-
 function initializeRunnerEventListeners() {
-    // Buttons
+    // --- Buttons ---
     loadCurrentTrainingModelBtnRun.addEventListener('click', async () => {
         if (!trainerInitialized) return showGlobalStatus("Trainer not initialized.", false);
         const response = await postRequest('/load_current_training_model_for_runner');
@@ -138,9 +138,8 @@ function initializeRunnerEventListeners() {
         if (response.success) {
             runModelParamsText.textContent = response.model_summary || 'N/A';
             runnerModelLoaded = true;
-            runnerLoopActive = false; 
-            if (runningStatusIntervalId) clearInterval(runningStatusIntervalId);
-            runningStatusIntervalId = setInterval(fetchRunnerStatus, 1000);
+            runnerLoopActive = false;
+            fetchRunnerStatus(); // Fetch initial state
             if (response.metadata) {
                 enableEntropyRunCheckbox.checked = response.metadata.enable_entropy || false;
                 entropyStrengthRunSlider.value = response.metadata.entropy_strength || 0.0;
@@ -150,6 +149,7 @@ function initializeRunnerEventListeners() {
         }
         updateRunnerControlsAvailability();
     });
+
     loadModelBtnRun.addEventListener('click', async () => {
         const formData = new FormData();
         if (modelFileInputRun.files.length > 0) formData.append('model_file', modelFileInputRun.files[0]);
@@ -163,8 +163,7 @@ function initializeRunnerEventListeners() {
             runModelParamsText.textContent = modelInfoText;
             runnerModelLoaded = true;
             runnerLoopActive = false;
-            if (runningStatusIntervalId) clearInterval(runningStatusIntervalId);
-            runningStatusIntervalId = setInterval(fetchRunnerStatus, 1000);
+            fetchRunnerStatus(); // Fetch initial state
              if (response.metadata) {
                 enableEntropyRunCheckbox.checked = response.metadata.enable_entropy || false;
                 entropyStrengthRunSlider.value = response.metadata.entropy_strength || 0.0;
@@ -174,57 +173,77 @@ function initializeRunnerEventListeners() {
         }
         updateRunnerControlsAvailability();
     });
+
     startRunningLoopBtn.addEventListener('click', async () => {
         if (!runnerModelLoaded) return;
         const response = await postRequest('/start_running');
         showGlobalStatus(response.message, response.success);
         if (response.success) {
             runnerLoopActive = true;
-            const fps = parseInt(runFpsSlider.value);
+            // MODIFIED: Start the polling loop here
             if (runningStatusIntervalId) clearInterval(runningStatusIntervalId);
+            const fps = parseInt(runFpsSlider.value);
             runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(33, 1000 / fps));
         }
         updateRunnerControlsAvailability();
     });
+
     stopRunningLoopBtn.addEventListener('click', async () => {
         if (!runnerModelLoaded) return;
         const response = await postRequest('/stop_running');
         showGlobalStatus(response.message, response.success);
+        
+        // MODIFIED: Stop the polling loop here
+        runnerLoopActive = false;
+        if (runningStatusIntervalId) {
+            clearInterval(runningStatusIntervalId);
+            runningStatusIntervalId = null;
+        }
+        // Fetch status one last time to update the UI to "Paused"
         fetchRunnerStatus();
         updateRunnerControlsAvailability();
     });
+
     resetRunnerStateBtn.addEventListener('click', () => handleRunnerAction('reset_runner'));
 
-    // Canvas Interaction
+    // --- Canvas Interaction ---
     previewCanvasRunEl.addEventListener('mousedown', (event) => {
         if (event.button !== 0 || !runnerModelLoaded) return;
         isInteractingWithRunCanvas = true;
         performCanvasAction(event);
         event.preventDefault();
     });
+
     previewCanvasRunEl.addEventListener('mousemove', (event) => {
         if (!isInteractingWithRunCanvas) return;
         performCanvasAction(event);
         event.preventDefault();
     });
+
     document.addEventListener('mouseup', (event) => {
         if (event.button !== 0 || !isInteractingWithRunCanvas) return;
         isInteractingWithRunCanvas = false;
-        lastXRun = -1; lastYRun = -1;
     });
+
     previewCanvasRunEl.addEventListener('mouseleave', () => {
         if (isInteractingWithRunCanvas) {
             isInteractingWithRunCanvas = false;
-            lastXRun = -1; lastYRun = -1;
         }
     });
 
-    // Inputs
+    // --- Inputs ---
     runBrushSizeSlider.addEventListener('input', () => { runBrushSizeValue.textContent = runBrushSizeSlider.value; });
     runFpsSlider.addEventListener('input', async () => {
         const fps = parseInt(runFpsSlider.value);
         runFpsValue.textContent = fps;
-        if (runnerModelLoaded) await postRequest('/set_runner_speed', { fps: fps });
+        if (runnerModelLoaded) {
+            await postRequest('/set_runner_speed', { fps: fps });
+            // If the loop is active, adjust the interval immediately
+            if(runnerLoopActive && runningStatusIntervalId) {
+                clearInterval(runningStatusIntervalId);
+                runningStatusIntervalId = setInterval(fetchRunnerStatus, Math.max(33, 1000/fps));
+            }
+        }
     });
     runToolModeEraseRadio.addEventListener('change', () => { if (runToolModeEraseRadio.checked) currentRunToolMode = 'erase'; updateRunnerControlsAvailability(); });
     runToolModeDrawRadio.addEventListener('change', () => { if (runToolModeDrawRadio.checked) currentRunToolMode = 'draw'; updateRunnerControlsAvailability(); });
