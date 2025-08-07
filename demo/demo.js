@@ -12,7 +12,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let brushSize = 10;
     let simSpeed = 1;
     let stepAccumulator = 0.0;
-    let drawColor = '#ff0000'; // Default draw color
+    let drawColor = '#ff0000';
+    // New state for entropy
+    let entropyEnabled = false;
+    let entropyStrength = 0.02;
 
     // --- DOM Elements ---
     const modelSelect = document.getElementById('model-select');
@@ -29,7 +32,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const toolModeRadios = document.querySelectorAll('input[name="tool-mode"]');
     const brushSizeSlider = document.getElementById('brush-size-slider');
     const brushSizeValue = document.getElementById('brush-size-value');
-    const drawColorPicker = document.getElementById('draw-color-picker'); // New color picker element
+    const drawColorPicker = document.getElementById('draw-color-picker');
+    // New entropy elements
+    const entropyEnableCheckbox = document.getElementById('entropy-enable-checkbox');
+    const entropyStrengthSlider = document.getElementById('entropy-strength-slider');
+    const entropyStrengthValue = document.getElementById('entropy-strength-value');
 
     const canvas = document.getElementById('demo-canvas');
     const gl = canvas.getContext("webgl");
@@ -45,9 +52,12 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             manifest = await response.json();
             
+            // Set initial state from HTML defaults
             simSpeed = speedLevels[parseInt(speedSlider.value)];
             speedValue.textContent = `${simSpeed}x`;
             drawColor = drawColorPicker.value;
+            entropyEnabled = entropyEnableCheckbox.checked;
+            entropyStrength = parseFloat(entropyStrengthSlider.value);
 
             populateModelSelect();
             setupEventListeners();
@@ -129,6 +139,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (!ca) {
                 ca = createCA(gl, modelWeights, [W, H]);
+                // Set initial entropy settings on the new CA instance
+                ca.setEntropy(entropyEnabled, entropyStrength);
             } else {
                 ca.setWeights(modelWeights);
                 ca.reset();
@@ -179,7 +191,6 @@ document.addEventListener("DOMContentLoaded", () => {
         toolModeRadios.forEach(radio => {
             radio.addEventListener('change', (e) => {
                 toolMode = e.target.value;
-                // Enable/disable the color picker based on the tool
                 drawColorPicker.disabled = (toolMode !== 'draw');
             });
         });
@@ -188,6 +199,20 @@ document.addEventListener("DOMContentLoaded", () => {
             drawColor = e.target.value;
         });
         
+        // New Entropy Listeners
+        entropyEnableCheckbox.addEventListener('change', (e) => {
+            entropyEnabled = e.target.checked;
+            entropyStrengthSlider.disabled = !entropyEnabled;
+            // Immediately update the CA instance
+            if (ca) ca.setEntropy(entropyEnabled, entropyStrength);
+        });
+
+        entropyStrengthSlider.addEventListener('input', (e) => {
+            entropyStrength = parseFloat(e.target.value);
+            entropyStrengthValue.textContent = entropyStrength.toFixed(3);
+            if (ca) ca.setEntropy(entropyEnabled, entropyStrength);
+        });
+
         function canvasToGrid(x, y) {
             const [w, h] = ca.gridSize;
             const gridX = Math.floor(x / canvas.clientWidth * w);
@@ -202,7 +227,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const rect = canvas.getBoundingClientRect();
             const [x, y] = canvasToGrid(e.clientX - rect.left, e.clientY - rect.top);
             
-            // For drawing, pass the color. For erasing, we don't need it.
             if (toolMode === 'draw') {
                 ca.paint(x, y, brushSize, 'color', drawColor);
             } else {

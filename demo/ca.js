@@ -79,7 +79,6 @@ const PREFIX = `
 `;
 
 const PROGRAMS = {
-    // --- MODIFICATION: Updated Paint Shader ---
     paint: `
     uniform vec2 u_pos;
     uniform float u_r;
@@ -93,20 +92,43 @@ const PROGRAMS = {
           discard;
         
         vec4 result = vec4(0.0);
-        if (u_brush > 0.5) { // Any brush that is not 'clear'
+        if (u_brush > 0.5) { 
             float ch = getOutputChannel();
-            if (u_brush < 1.5) { // Original seed brush (u_brush == 1.0)
-                // Set hidden states to 1.0
+            if (u_brush < 1.5) { 
                 result = vec4(vec3(float(ch > 0.5)), 1.0);
-            } else { // Color draw brush (u_brush == 2.0)
-                if (ch == 0.0) { // RGBA channels
+            } else { 
+                if (ch == 0.0) { 
                     result = u_draw_color;
-                } else { // Hidden channels
-                    result = vec4(1.0); // Set to 1 to encourage growth
+                } else { 
+                    result = vec4(1.0); 
                 }
             }
         }
         setOutput(result);
+    }`,
+    // --- NEW: Shader to add noise ---
+    add_noise: `
+    uniform float u_seed;
+    uniform float u_strength;
+    varying vec2 uv;
+    
+    // "Hash without Sine" by David Hoskins (https://www.shadertoy.com/view/4djSRW)
+    float hash13(vec3 p3) {
+      p3  = fract(p3 * .1031);
+      p3 += dot(p3, p3.yzx + 33.33);
+      return fract((p3.x + p3.y) * p3.z);
+    }
+    
+    void main() {
+        vec4 state = u_input_readUV(uv);
+        vec3 p = vec3(getOutputXY(), u_seed);
+        
+        // Generate four noise values, one for each component of the vec4
+        vec4 noise = vec4(hash13(p.xyz), hash13(p.yzx), hash13(p.zxy), hash13(p.xzy));
+        noise = (noise - 0.5) * 2.0; // map to [-1, 1]
+        
+        // Add noise to every channel, including alpha
+        setOutput(state + noise * u_strength);
     }`,
     perception: `
     uniform float u_angle;
@@ -134,7 +156,7 @@ const PROGRAMS = {
     }`,
     dense: `
     uniform sampler2D u_weightTex;
-    uniform vec3 u_weightCoefs; // weigthScale, biasScale, center
+    uniform vec3 u_weightCoefs;
     
     const float MAX_PACKED_DEPTH = 32.0;
     
@@ -166,7 +188,7 @@ const PROGRAMS = {
               break;
           }
       }
-      result += readBias(p);  // bias
+      result += readBias(p);
       setOutput(result);
     }`,
     dropout: `
@@ -324,47 +346,41 @@ export function createCA(gl, layerWeights, gridSize) {
         position: [-1, -1, 0, 1, -1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1, 1, 0],
     });
     
-
     let stateBuf = createTensor(gridW, gridH, CHANNEL_N);
     let newStateBuf = createTensor(gridW, gridH, CHANNEL_N);
     const perceptionBuf = createTensor(gridW, gridH, CHANNEL_N*3);
     const hiddenBuf = createTensor(gridW, gridH, 128, 'relu');
     const updateBuf = createTensor(gridW, gridH, CHANNEL_N);
     const maskedUpdateBuf = createTensor(gridW, gridH, CHANNEL_N);
+    // --- NEW: Buffer for the noisy state ---
+    const noisyStateBuf = createTensor(gridW, gridH, CHANNEL_N);
     
     let layerTex1 = createDenseInfo(layerWeights[0]);
     let layerTex2 = createDenseInfo(layerWeights[1]);
+
+    // --- NEW: State variables for entropy ---
+    let entropyEnabled = false;
+    let entropyStrength = 0.0;
+    
+    function setEntropy(enabled, strength) {
+        entropyEnabled = enabled;
+        entropyStrength = strength;
+    }
 
     let rotationAngle = 0.0;
     function setAngle(v) {
       rotationAngle = v/180.0*Math.PI;
     }
 
-    const ops = [
-        ()=>runLayer('perception', perceptionBuf, {u_input: stateBuf, u_angle: rotationAngle}),
-        ()=>runLayer('dense', hiddenBuf, {u_input: perceptionBuf,
-            u_weightTex: layerTex1.tex, u_weightCoefs:layerTex1.coefs}),
-        ()=>runLayer('dense', updateBuf, {u_input: hiddenBuf,
-            u_weightTex: layerTex2.tex, u_weightCoefs: layerTex2.coefs}),
-        ()=>runLayer('dropout', maskedUpdateBuf, {u_input: updateBuf,
-            u_seed: Math.random()*1000, u_udpateProbability: 0.5}),
-        ()=>runLayer('update', newStateBuf, {u_input: stateBuf, u_update: maskedUpdateBuf}),
-    ];
-
     let fpsStartTime;
     let fpsCount = 0;
     let lastFpsCount = '';
     let totalStepCount = 0;
-    function fps() {
-        return lastFpsCount;
-    }
-    function getStepCount() {
-      return totalStepCount;
-    }
+    function fps() { return lastFpsCount; }
+    function getStepCount() { return totalStepCount; }
 
     let lastDamage = [0, 0, -1];
 
-    // --- MODIFICATION: Updated Paint Function ---
     function paint(x, y, r, brush, color_hex) {
         const uniforms = { u_pos: [x, y], u_r: r };
         const brush_map = {'clear': 0.0, 'seed': 1.0, 'color': 2.0};
@@ -376,7 +392,7 @@ export function createCA(gl, layerWeights, gridSize) {
             const b = parseInt(color_hex.slice(5, 7), 16) / 255.0;
             uniforms.u_draw_color = [r, g, b, 1.0];
         } else {
-            uniforms.u_draw_color = [0.0, 0.0, 0.0, 0.0]; // Default/unused
+            uniforms.u_draw_color = [0.0, 0.0, 0.0, 0.0];
         }
         
         runLayer('paint', stateBuf, uniforms);
@@ -388,16 +404,36 @@ export function createCA(gl, layerWeights, gridSize) {
 
     function reset() {
       paint(0, 0, 10000, 'clear');
-      // Use the 'seed' brush for the initial spark
       paint(gridW/2, gridH/2, 1, 'seed');
       totalStepCount = 0;
     }
     reset();
 
+    // --- MODIFICATION: Updated step function to handle entropy ---
     function step() {
-        for (const op of ops) op();
+        // Determine the input for this step's calculations.
+        // If entropy is on, create a noisy version of the state first.
+        const inputForStep = (entropyEnabled && entropyStrength > 0.0)
+            ? runLayer('add_noise', noisyStateBuf, {
+                  u_input: stateBuf,
+                  u_seed: Math.random() * 1000,
+                  u_strength: entropyStrength
+              }).output
+            : stateBuf;
+
+        // Run the main CA update pipeline
+        const perceptionOut = runLayer('perception', perceptionBuf, { u_input: inputForStep, u_angle: rotationAngle }).output;
+        const hiddenOut = runLayer('dense', hiddenBuf, { u_input: perceptionOut, u_weightTex: layerTex1.tex, u_weightCoefs:layerTex1.coefs }).output;
+        const updateOut = runLayer('dense', updateBuf, { u_input: hiddenOut, u_weightTex: layerTex2.tex, u_weightCoefs: layerTex2.coefs }).output;
+        const maskedUpdateOut = runLayer('dropout', maskedUpdateBuf, { u_input: updateOut, u_seed: Math.random()*1000, u_udpateProbability: 0.5 }).output;
+
+        // The update is added to the same state that was used for perception
+        runLayer('update', newStateBuf, { u_input: inputForStep, u_update: maskedUpdateOut });
+        
+        // Swap buffers for the next frame
         [stateBuf, newStateBuf] = [newStateBuf, stateBuf]
 
+        // Update counters
         totalStepCount += 1;
         fpsCount += 1;
         let time = Date.now();
@@ -412,20 +448,13 @@ export function createCA(gl, layerWeights, gridSize) {
         }
     }
 
-    const visModes = ['color', 'state', 'perception', 'hidden', 'update', 'maskedUpdate'];
-
     function draw(visMode) {
         visMode = visMode || 'color';
         gl.useProgram(progs.vis.program);
         twgl.setBuffersAndAttributes(gl, progs.vis, quad);
         const uniforms = {u_raw: 0.0, u_lastDamage: lastDamage}
         lastDamage[2] = Math.max(-0.1, lastDamage[2]-1.0);
-        let inputBuf = stateBuf;
-        if (visMode != 'color') {
-            inputBuf = {stateBuf, perceptionBuf, hiddenBuf, updateBuf, maskedUpdateBuf}[visMode+'Buf'];
-            uniforms.u_raw = 1.0;
-        }
-        setTensorUniforms(uniforms, 'u_input', inputBuf);
+        setTensorUniforms(uniforms, 'u_input', stateBuf);
         twgl.setUniforms(progs.vis, uniforms);
         twgl.drawBufferInfo(gl, quad);
     }
@@ -436,14 +465,7 @@ export function createCA(gl, layerWeights, gridSize) {
         layerTex1 = createDenseInfo(layerWeights[0]);
         layerTex2 = createDenseInfo(layerWeights[1]);
     }
-
-    const _flushBuf = new Uint8Array(4);
-    function flush(buf) {
-        buf = buf || stateBuf;
-        twgl.bindFramebufferInfo(gl, buf.fbi);
-        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _flushBuf);
-    }
     
     return {reset, step, draw, setWeights, paint, gridSize, 
-      fps, getStepCount, setAngle};
+      fps, getStepCount, setAngle, setEntropy }; // Expose setEntropy
 }
