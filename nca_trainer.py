@@ -23,11 +23,17 @@ class NCATrainer:
         target_source_kind = config.get('target_source_kind', 'file')
 
         self.best_loss = float('inf')
+        
+        # --- MODIFICATION START ---
+        # If no run_dir is provided (e.g., from the conversion script),
+        # we don't need to save the "best model" trainer checkpoint.
         if self.run_dir:
             self.best_model_save_path = os.path.join(self.run_dir, "best_model.weights.h5")
+            tf.print(f"NCATrainer: Best model will be saved to {self.best_model_save_path}")
         else:
-            self.best_model_save_path = os.path.join(config['model_folder_path'], "best_trainer_model.h5")
-        tf.print(f"NCATrainer: Best model will be saved to {self.best_model_save_path}")
+            self.best_model_save_path = None
+            tf.print("NCATrainer: No run_dir or model_folder_path provided, 'best model' checkpointing is disabled for this session.")
+        # --- MODIFICATION END ---
 
         if target_source_kind == "drawn_defines_padded_grid":
             self.pad_target = tf.convert_to_tensor(target_img_rgba_processed, dtype=tf.float32)
@@ -96,37 +102,28 @@ class NCATrainer:
         batch_size = self.config['batch_size']
         experiment_type = self.config.get('experiment_type', 'Growing')
 
-        # --- CORRECTED BATCH PREPARATION LOGIC ---
         if experiment_type == "Growing":
-            # For "Growing" experiments, always start from a fresh seed.
             x0_batch = np.repeat(self.seed_state[None, ...], batch_size, axis=0)
-            sampled_indices = None # Not sampling from the pool
-        else: # For "Persistent" and "Regenerating" experiments
+            sampled_indices = None
+        else:
             if not self.pool or len(self.pool) == 0:
                 return None, None
-
             sampled_indices = self.pool.get_indices(batch_size)
             if sampled_indices.size == 0:
                 return None, None
             
             x0_batch = self.pool.x[sampled_indices].copy()
-
-            # Calculate loss for the batch and sort by loss (highest first)
             loss_ranks = self._loss_fn(tf.convert_to_tensor(x0_batch)).numpy().argsort()[::-1]
             x0_batch = x0_batch[loss_ranks]
-            sampled_indices = sampled_indices[loss_ranks] # Reorder indices to match
-
-            # Replace the worst-performing sample with a fresh seed
+            sampled_indices = sampled_indices[loss_ranks]
             x0_batch[0] = self.seed_state
 
-            # Apply damage to the best-performing samples if regenerating
             damage_n_config = self.config.get('damage_n', 0)
             if damage_n_config > 0 and x0_batch.shape[0] > 0:
                 h_grid, w_grid = self.pad_target.shape[:2]
                 num_to_damage = min(damage_n_config, x0_batch.shape[0])
                 if num_to_damage > 0:
                     damage_masks = make_circle_masks(num_to_damage, h_grid, w_grid).numpy()[..., None]
-                    # Damage the lowest-loss samples (which are at the end of the sorted batch)
                     x0_batch[-num_to_damage:] *= (1.0 - damage_masks)
 
         if x0_batch.shape[0] == 0:
@@ -134,7 +131,6 @@ class NCATrainer:
 
         x_updated_batch, loss = self._train_step_tf(tf.convert_to_tensor(x0_batch))
         
-        # If we used the pool, commit the updated states back
         if sampled_indices is not None and experiment_type != "Growing":
             self.pool.x[sampled_indices] = x_updated_batch.numpy()
 
@@ -147,11 +143,15 @@ class NCATrainer:
 
         return self.last_preview_state, self.last_loss
         
-    # --- The rest of the class remains the same ---
-
     def _save_best_model_if_improved(self):
         if self.last_loss is None or self.current_step == 0:
             return
+
+        # --- MODIFICATION START ---
+        # Do not attempt to save if the path was not configured
+        if self.best_model_save_path is None:
+            return
+        # --- MODIFICATION END ---
 
         if self.current_step % 100 == 0:
             if self.last_loss < self.best_loss:
