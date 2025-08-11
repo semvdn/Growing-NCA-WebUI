@@ -1,155 +1,154 @@
 # Neural Cellular Automata Web UI
 
-A web-based application for interactively training and running Neural Cellular Automata (NCA) models, allowing users to define target patterns, configure training parameters, and visualize real-time evolution.
+This project provides an interactive, web-based user interface for training and running "Growing" Neural Cellular Automata (NCA) models, inspired by the research paper and Distill article ["Growing Neural Cellular Automata"](https://distill.pub/2020/growing-ca/).
 
-## Features
+The application is built with a Python backend using Flask and TensorFlow for the core NCA logic, and a vanilla JavaScript frontend for a dynamic user experience. It allows users to define target patterns, train models in real-time, observe their growth, and interact with the resulting automata in a separate "runner" environment.
 
-*   **Interactive Target Definition**: Draw custom target patterns directly on a canvas or upload image files (PNG, JPG).
-*   **Flexible Training Modes**: Support for "Growing", "Persistent", and "Regenerating" NCA experiments.
-*   **Configurable Training Parameters**: Adjust fire rate, batch size, pool size, learning rate, and apply entropy (noise) during training.
-*   **Model Management**: Save trained models as checkpoints and load existing models to resume training or for running.
-*   **Real-time Visualization**: Live preview of training progress and NCA evolution.
-*   **Interactive Runner Mode**: Explore trained NCA models with tools to erase or draw on the live simulation, and control simulation speed (FPS).
-*   **Capture Tools**: Take screenshots and record videos of the NCA evolution.
 
-## Installation
+
+## Live Demo
+
+A standalone, JavaScript-only showcase of the trained models is available for interaction. This demo runs entirely in the browser using WebGL and can be hosted on static sites like GitHub Pages.
+
+**[➡️ View the Live Demo Here](https://your-github-username.github.io/your-repository-name/demo/)**
+
+## Key Features
+
+-   **Interactive Target Creation**: Draw your own target patterns directly on an HTML5 canvas or upload an image file.
+-   **Multiple Training Regimens**: Train models using three distinct experiment types:
+    -   **Growing**: Trains the model to grow from a single seed into the target pattern.
+    -   **Persistent**: Trains the model to not only grow but also maintain its form over time.
+    -   **Regenerating**: Trains a persistent model to be robust to damage by erasing parts of the pattern during training.
+-   **Live Training Preview**: Watch your NCA model learn and grow in real-time directly in your browser.
+-   **Model Management**: Save trained models (weights, metadata, and JavaScript-runnable formats) and reload them later to continue training.
+-   **Interactive Runner**: Load trained models into a separate simulation environment to experiment with them.
+-   **Dynamic Interaction**: Interact with the running NCA using color draw and erase tools, adjust the simulation speed, and inject noise (entropy) to observe the model's robustness and emergent behaviors.
+
+## Project Structure
+
+```
+/
+├── app.py                      # Main Flask application entry point.
+├── app_state.py                # Centralized state management for the web app.
+├── app_routes_trainer.py       # Flask routes for the Training tab.
+├── app_routes_runner.py        # Flask routes for the Runner tab.
+├── app_utils.py                # Utility functions.
+│
+├── nca_globals.py              # Global constants (grid size, channels, etc.).
+├── nca_model.py                # TensorFlow/Keras definition of the CA model.
+├── nca_trainer.py              # The NCATrainer class for the training loop.
+├── nca_runner.py               # The NCARunner class for the simulation loop.
+├── nca_utils.py                # Utilities for image processing and model summaries.
+├── model_converter.py          # Functions to export models to JS formats.
+│
+├── train_and_convert.py        # CLI script to train models for the demo.
+│
+├── static/                     # Frontend assets for the main web app.
+│   └── js/
+├── templates/
+│   └── index.html              # HTML for the main web app.
+│
+├── demo/                       # Standalone, static showcase application.
+│   ├── index.html              # The HTML page for the demo.
+│   ├── ca.js                   # Core WebGL and shader logic for the demo.
+│   ├── demo.js                 # UI and application logic for the demo.
+│   ├── models.json             # Manifest of available models for the demo.
+│   ├── h5_models/              # Directory for h5 model files.
+│   └── webgl_models/           # Directory for quantized model files.
+│
+├── uploads/                    # Default directory for uploaded target images.
+└── models/                     # Default directory for saved model checkpoints and runs.
+```
+
+## Setup and Installation (Main Web App)
 
 ### Prerequisites
 
-*   Python 3.x
-*   `pip` (Python package installer)
+-   Python 3.9+
+-   An NVIDIA GPU with CUDA and cuDNN installed is **highly recommended** for acceptable training performance.
 
-### Setup Steps
+### Installation Steps
 
-1.  **Clone the repository**:
+1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-repo/Growing-NCA-WebUI.git
-    cd Growing-NCA-WebUI
+    git clone <your-repository-url>
+    cd <your-repository-name>
     ```
-    (Note: Replace `https://github.com/your-repo/Growing-NCA-WebUI.git` with the actual repository URL if available.)
 
-2.  **Install Python dependencies**:
+2.  **Create and activate a virtual environment:**
+    ```bash
+    # Using venv
+    python -m venv venv
+    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+
+    # Or using conda
+    conda create -n nca python=3.11
+    conda activate nca
+    ```
+
+3.  **Install the required Python packages:**
+    Create a `requirements.txt` file with the following content and install it.
+    ```
+    # requirements.txt
+    Flask
+    tensorflow[and-cuda]
+    numpy
+    Pillow
+    werkzeug
+    ```
+    Then run:
     ```bash
     pip install -r requirements.txt
     ```
-    This will install necessary libraries like `numpy`, `flask`, `pillow`, `requests`, and `tensorflow`.
 
-3.  **TensorFlow Installation (Optional - for GPU support)**:
-    For GPU acceleration, ensure you have a compatible NVIDIA GPU and CUDA Toolkit installed. Then, install the GPU version of TensorFlow:
-    ```bash
-    pip install tensorflow[and-cuda] # For TensorFlow 2.10+
-    # Or for older versions: pip install tensorflow-gpu
-    ```
-    If you do not have a compatible GPU, the CPU version of TensorFlow will be used automatically.
+### Running the Application
 
-## Usage
-
-### Starting the Application
-
-To start the Flask web application, run:
+Once the setup is complete, you can start the Flask development server from the project root directory:
 
 ```bash
 python app.py
 ```
 
-The application will typically run on `http://127.0.0.1:5000/` (or `http://localhost:5000/`). Open this URL in your web browser.
+The application will start, and you will see output indicating the server is running, including the local URL (usually `http://127.0.0.1:5000`). Open this URL in your web browser to access the Web UI.
 
-### Web Interface Overview
+## User Guide (Main Web App)
 
-The web interface is divided into two main tabs: **Training** and **Run NCA**.
+The application is split into two main tabs: **Training** and **Run NCA**.
 
-#### Training Tab
+### Training a New Model
 
-This tab allows you to define a target pattern and train an NCA model to reproduce it.
+1.  **Define a Target Pattern:**
+    -   **Option A: Draw a Pattern**: Use the canvas on the right. You can select a color, brush size, and opacity. Use the "Eraser Mode" checkbox to erase. When you are happy with your drawing, give it a name and click **"Confirm Drawing as Target"**.
+    -   **Option B: Upload an Image**: Click **"Choose File"**, select an image (64x64 PNG with transparency works best), and click **"Load Image File for Trainer"**.
 
-1.  **Define Target Pattern**:
-    *   **Draw on Canvas**: Use the drawing tools (color picker, brush size, opacity, eraser) to create your own target pattern. Click "Confirm Drawing as Target" and provide a name.
-    *   **Upload Image File**: Click "Choose File" to select a PNG or JPG image from your computer, then click "Load Image File for Trainer".
+2.  **Configure and Initialize Training:**
+    -   In the "Configure Training" section, select your desired **Experiment Type** (`Growing`, `Persistent`, or `Regenerating`).
+    -   Adjust other parameters like Fire Rate, Batch Size, etc., if needed.
+    -   Click **"Initialize Trainer with Target"**.
 
-2.  **Configure Training**:
-    *   **Experiment Type**: Choose between "Growing", "Persistent", or "Regenerating" NCA behaviors.
-    *   **Parameters**: Adjust `Fire Rate`, `Batch Size`, `Pool Size`, and `Learning Rate`.
-    *   **Entropy (Noise)**: Optionally enable and adjust `Entropy Strength` to introduce noise during training, which can help with robustness.
+3.  **Start Training:**
+    -   Click **"Start Training"**. The training loop will begin on the server.
+    -   The preview area will update in real-time to show the current state of a sample from the training pool.
+    -   The status box will show the current step, loss, and total training time.
+    -   Click **"Stop Training"** at any time to pause. The model's state and weights will be preserved.
 
-3.  **Control Training**:
-    *   Click "Initialize Trainer with Target" after defining your target and configuring parameters.
-    *   Click "Start Training" to begin the training process.
-    *   Click "Stop Training" to pause the training. The model state is preserved.
-    *   Click "Save Trained Model" to save the current model weights and metadata as a checkpoint in the `models/` directory.
+4.  **Save the Model:**
+    -   Once you are satisfied with the training progress, click **"Save Trained Model"**.
+    -   This creates a new sub-directory in the `models/` folder, saving the `.h5` weights, metadata, and exported JS models.
 
-4.  **Load Existing Model to Continue Training**:
-    *   Upload a previously saved `.weights.h5` model file using "Choose File" and click "Load Trainer Model". This will restore the model and its training state, allowing you to continue training.
+### Running and Interacting with a Model
 
-5.  **Capture Tools**:
-    *   "Take Screenshot": Capture the current state of the training preview.
-    *   "Start Recording" / "Stop Recording": Record the training evolution as a video.
-    *   "White Background": Toggle a white background for captures.
+1.  **Load a Model:**
+    -   **Option A: Load from Current Training**: If you have a training session in the "Training" tab, click **"Load Current Training Model"**.
+    -   **Option B: Load from File**: Click **"Choose File"**, navigate to a `models/` sub-directory, and select a `.weights.h5` file. Click **"Load from File"**.
 
-#### Run NCA Tab
+2.  **Run the Simulation:**
+    -   Click **"Start Running Loop"**. The NCA simulation will begin.
+    -   Use the **Speed** slider to control the simulation's target FPS.
+    -   Click **"Reset Runner State to Seed"** to clear the grid and start again from a single living cell.
 
-This tab allows you to load a trained NCA model and interact with its live simulation.
-
-1.  **Load Model**:
-    *   **Upload Model File**: Upload a `.weights.h5` model file from your computer.
-    *   **Load Current Training Model**: Load the model currently being trained (or the last saved state of the trainer) directly into the runner.
-    *   If no file is chosen for "Load from File", the server will attempt to load the most recently saved model.
-
-2.  **Control Runner**:
-    *   "Start Running Loop": Begin the NCA simulation.
-    *   "Stop Running Loop": Pause the simulation.
-    *   "Reset Runner State to Seed": Reset the simulation to its initial seed state.
-
-3.  **Interaction Tools**:
-    *   Select "Erase" or "Draw" mode.
-    *   Choose a `Draw color` (for draw mode).
-    *   Adjust `Brush Size`.
-    *   Click and drag on the "NCA Runner" canvas to modify the live simulation.
-
-4.  **Speed Control**:
-    *   Adjust the "Target FPS" slider to control the simulation speed.
-
-5.  **Entropy (Noise)**:
-    *   Optionally enable and adjust `Entropy Strength` to introduce noise during the live simulation.
-
-6.  **Capture Tools**:
-    *   "Take Screenshot": Capture the current state of the runner preview.
-    *   "Start Recording" / "Stop Recording": Record the runner evolution as a video.
-    *   "White Background": Toggle a white background for captures.
-
-## Project Structure
-
-*   `app.py`: The main Flask application, handling all web routes, global state, and threading for training and running loops.
-*   `nca_globals.py`: Defines global constants and configuration parameters used throughout the application.
-*   `nca_model.py`: Contains the TensorFlow Keras `CAModel` class, defining the neural network architecture for the NCA.
-*   `nca_trainer.py`: Implements the core training logic, including the training loop, loss calculation, and saving of best models.
-*   `nca_runner.py`: Manages the NCA simulation loop for the "Run NCA" tab, handling state updates, history, and user interactions.
-*   `nca_utils.py`: Provides utility functions such as image loading, state manipulation, and sample pooling.
-*   `requirements.txt`: Lists all Python dependencies required to run the application.
-*   `templates/`: Directory containing HTML templates, primarily `index.html` for the main web interface.
-*   `static/`: Contains static web assets, including `js/script.js` for frontend logic and styling.
-*   `models/`: A directory where trained NCA models (weights and metadata) are saved and loaded.
-*   `uploads/`: A temporary directory for storing user-uploaded target images.
-*   `TODO.md`: A markdown file outlining planned features and improvements for the project.
-
-## Dependencies
-
-The project relies on the following Python libraries, listed in `requirements.txt`:
-
-*   `numpy`: For numerical operations, especially with array manipulation.
-*   `flask`: The web framework used to build the application.
-*   `pillow`: For image processing tasks (e.g., loading and saving images).
-*   `requests`: (Potentially used for internal API calls or external resources, though not explicitly visible in core logic provided).
-*   `tensorflow`: The deep learning framework powering the Neural Cellular Automata model.
-
-## Future Enhancements
-
-Based on the `TODO.md` file, here are some planned future enhancements:
-
-*   Further modularize `script.js` and `app.py` for improved maintainability.
-*   Add network visualization and the option to inspect individual cells in the "Run NCA" tab.
-*   Explore advanced features like animations and 3D NCA simulations.
-*   Allow for custom neural network architectures to be defined and used.
-
-## License
-
-This project is open-source and available under the MIT License.
+3.  **Interact with the NCA:**
+    -   **Tool Mode**: Select "Erase" or "Draw" to modify the grid.
+    -   **Brush Size**: Adjust the size of your interaction tool.
+    -   **Draw Color**: When in "Draw" mode, select a color to paint new cells onto the canvas.
+    -   **Entropy Dynamics**: Check "Enable Entropy" to add random noise to the NCA's state at each step and use the **Strength** slider to control the amount.
