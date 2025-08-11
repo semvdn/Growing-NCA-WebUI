@@ -18,17 +18,17 @@ The application is built with a Python backend using Flask and TensorFlow for th
     <tr>
       <td align="center"><b>Plant</b></td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/plant_growing.gif" width="220px" alt="Animation of the Plant 'Growing' model"/>
         </a>
       </td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/plant_persistent.gif" width="220px" alt="Animation of the Plant 'Persistent' model"/>
         </a>
       </td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/plant_regen.gif" width="220px" alt="Animation of the Plant 'Regenerating' model"/>
         </a>
       </td>
@@ -37,17 +37,17 @@ The application is built with a Python backend using Flask and TensorFlow for th
     <tr>
       <td align="center"><b>Goldfish</b></td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/goldfish_growing.gif" width="220px" alt="Animation of the Goldfish 'Growing' model"/>
         </a>
       </td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/goldfish_persistent.gif" width="220px" alt="Animation of the Goldfish 'Persistent' model"/>
         </a>
       </td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/goldfish_regen.gif" width="220px" alt="Animation of the Goldfish 'Regenerating' model"/>
         </a>
       </td>
@@ -56,17 +56,17 @@ The application is built with a Python backend using Flask and TensorFlow for th
     <tr>
       <td align="center"><b>Snail</b></td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/demo/">
+        <a>
           <img src="./media/snail_growing.gif" width="220px" alt="Animation of the Snail 'Growing' model"/>
         </a>
       </td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/snail_persistent.gif" width="220px" alt="Animation of the Snail 'Persistent' model"/>
         </a>
       </td>
       <td align="center">
-        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+        <a>
           <img src="./media/snail_regen.gif" width="220px" alt="Animation of the Snail 'Regenerating' model"/>
         </a>
       </td>
