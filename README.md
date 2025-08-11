@@ -79,7 +79,7 @@ The application is built with a Python backend using Flask and TensorFlow for th
 
 A standalone, JavaScript-only showcase of the trained models is available for interaction. This demo runs entirely in the browser using WebGL and can be hosted on static sites like GitHub Pages.
 
-**[➡️ View the Live Demo Here](https://your-github-username.github.io/your-repository-name/demo/)**
+**[➡️ View the Live Demo Here](https://semvdn.github.io/Growing-NCA-WebUI/)**
 
 ## Key Features
 
