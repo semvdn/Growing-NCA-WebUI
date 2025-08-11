@@ -5,7 +5,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let manifest = null;
     let ca = null;
     let paused = false;
-    let currentCheckpoints = [];
     
     const speedLevels = [0.1, 0.25, 0.5, 1, 2, 4, 6, 8, 10];
     let toolMode = 'erase';
@@ -13,15 +12,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let simSpeed = 1;
     let stepAccumulator = 0.0;
     let drawColor = '#ff0000';
-    // New state for entropy
     let entropyEnabled = false;
     let entropyStrength = 0.02;
 
     // --- DOM Elements ---
     const modelSelect = document.getElementById('model-select');
     const regimenGroup = document.getElementById('regimen-radio-group');
-    const checkpointSlider = document.getElementById('checkpoint-slider');
-    const sliderValue = document.getElementById('slider-value');
     const resetButton = document.getElementById('reset-button');
     const playPauseButton = document.getElementById('play-pause-button');
     const stepCountEl = document.getElementById('stepCount');
@@ -33,7 +29,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const brushSizeSlider = document.getElementById('brush-size-slider');
     const brushSizeValue = document.getElementById('brush-size-value');
     const drawColorPicker = document.getElementById('draw-color-picker');
-    // New entropy elements
     const entropyEnableCheckbox = document.getElementById('entropy-enable-checkbox');
     const entropyStrengthSlider = document.getElementById('entropy-strength-slider');
     const entropyStrengthValue = document.getElementById('entropy-strength-value');
@@ -52,7 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             manifest = await response.json();
             
-            // Set initial state from HTML defaults
             simSpeed = speedLevels[parseInt(speedSlider.value)];
             speedValue.textContent = `${simSpeed}x`;
             drawColor = drawColorPicker.value;
@@ -76,56 +70,44 @@ document.addEventListener("DOMContentLoaded", () => {
             option.textContent = modelName;
             modelSelect.appendChild(option);
         }
-        updateRegimenAndSlider();
+        updateRegimenRadioButtons();
     }
 
-    function updateRegimenAndSlider() {
+    function updateRegimenRadioButtons() {
         const modelName = modelSelect.value;
         const modelData = manifest[modelName];
 
         regimenGroup.innerHTML = '';
-        let firstRegimen = true;
-        for (const regimenName in modelData.regimens) {
+        
+        const regimenNames = Object.keys(modelData.regimens);
+        const defaultRegimen = regimenNames.includes('Regenerating') ? 'Regenerating' : regimenNames[0];
+
+        for (const regimenName of regimenNames) {
             const input = document.createElement('input');
             input.type = 'radio';
             input.name = 'regimen';
             input.value = regimenName;
             input.id = `radio-${regimenName}`;
-            if (firstRegimen) {
+            
+            if (regimenName === defaultRegimen) {
                 input.checked = true;
-                firstRegimen = false;
             }
+
             const label = document.createElement('label');
             label.htmlFor = `radio-${regimenName}`;
             label.textContent = regimenName;
             regimenGroup.appendChild(input);
             regimenGroup.appendChild(label);
         }
-        updateSlider();
     }
     
-    function updateSlider() {
-        const modelName = modelSelect.value;
-        const selectedRegimen = document.querySelector('input[name="regimen"]:checked').value;
-        currentCheckpoints = manifest[modelName].regimens[selectedRegimen].checkpoints;
-
-        checkpointSlider.min = 0;
-        checkpointSlider.max = currentCheckpoints.length - 1;
-        checkpointSlider.value = checkpointSlider.max;
-        updateSliderValue();
-    }
-
-    function updateSliderValue() {
-        const sliderIndex = parseInt(checkpointSlider.value);
-        const steps = currentCheckpoints[sliderIndex];
-        sliderValue.textContent = `${steps} steps`;
-    }
-
     async function updateModel() {
         const modelName = modelSelect.value;
         const selectedRegimen = document.querySelector('input[name="regimen"]:checked').value;
-        const sliderIndex = parseInt(checkpointSlider.value);
-        const steps = currentCheckpoints[sliderIndex];
+        
+        // Get the list of checkpoints and use the last one.
+        const checkpoints = manifest[modelName].regimens[selectedRegimen].checkpoints;
+        const steps = checkpoints[checkpoints.length - 1];
         
         const regimen_str = selectedRegimen.toLowerCase();
         const modelPath = `webgl_models/${modelName}_${regimen_str}_${steps}.json`;
@@ -139,7 +121,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (!ca) {
                 ca = createCA(gl, modelWeights, [W, H]);
-                // Set initial entropy settings on the new CA instance
                 ca.setEntropy(entropyEnabled, entropyStrength);
             } else {
                 ca.setWeights(modelWeights);
@@ -156,20 +137,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function setupEventListeners() {
         modelSelect.addEventListener('change', () => {
-            updateRegimenAndSlider();
+            updateRegimenRadioButtons();
             updateModel();
         });
 
         regimenGroup.addEventListener('change', (e) => {
             if(e.target.name === 'regimen') {
-                updateSlider();
                 updateModel();
             }
         });
         
-        checkpointSlider.addEventListener('input', updateSliderValue);
-        checkpointSlider.addEventListener('change', updateModel);
-
         resetButton.addEventListener('click', () => ca && ca.reset());
 
         playPauseButton.addEventListener('click', () => {
@@ -199,11 +176,9 @@ document.addEventListener("DOMContentLoaded", () => {
             drawColor = e.target.value;
         });
         
-        // New Entropy Listeners
         entropyEnableCheckbox.addEventListener('change', (e) => {
             entropyEnabled = e.target.checked;
             entropyStrengthSlider.disabled = !entropyEnabled;
-            // Immediately update the CA instance
             if (ca) ca.setEntropy(entropyEnabled, entropyStrength);
         });
 

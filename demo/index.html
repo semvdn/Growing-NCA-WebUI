@@ -19,7 +19,7 @@
         button:hover { background-color: #eee; }
         .radio-group label { display: inline-block; margin-right: 15px; font-weight: normal;}
         .footer { width: 100%; text-align: center; margin-top: 20px; color: #888; font-size: 0.9em;}
-        #ips, #slider-value, #brush-size-value, #speed-value, #entropy-strength-value { font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #007bff; }
+        #ips, #brush-size-value, #speed-value, #entropy-strength-value { font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #007bff; }
     </style>
 </head>
 <body>
@@ -40,10 +40,7 @@
                 <label>Training Regimen:</label>
                 <div id="regimen-radio-group" class="radio-group"></div>
             </div>
-            <div class="control-group">
-                <label for="checkpoint-slider">Training Steps: <span id="slider-value">...</span></label>
-                <input type="range" id="checkpoint-slider" min="0" max="1" step="1">
-            </div>
+            <!-- The checkpoint slider has been removed from here -->
             <div class="control-group">
                 <label for="speed-slider">Speed: <span id="speed-value">1x</span></label>
                 <input type="range" id="speed-slider" min="0" max="8" value="3" step="1">
@@ -64,7 +61,6 @@
                  <input type="range" id="brush-size-slider" min="1" max="20" value="10" step="1">
             </div>
             
-            <!-- New Entropy Controls -->
             <div class="control-group">
                 <label><input type="checkbox" id="entropy-enable-checkbox"> Enable Entropy (Noise)</label>
                 <label for="entropy-strength-slider" style="margin-top: 8px;">Strength: <span id="entropy-strength-value">0.020</span></label>

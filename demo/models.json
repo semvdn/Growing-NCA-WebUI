@@ -1,0 +1,122 @@
+{
+  "plant": {
+    "emoji": "",
+    "regimens": {
+      "Growing": {
+        "checkpoints": [
+          3000
+        ]
+      },
+      "Persistent": {
+        "checkpoints": [
+          3000
+        ]
+      },
+      "Regenerating": {
+        "checkpoints": [
+          3000
+        ]
+      }
+    }
+  },
+  "snail": {
+    "emoji": "",
+    "regimens": {
+      "Growing": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Persistent": {
+        "checkpoints": [
+          8000
+        ]
+      },
+      "Regenerating": {
+        "checkpoints": [
+          10000
+        ]
+      }
+    }
+  },
+  "salamander": {
+    "emoji": "",
+    "regimens": {
+      "Growing": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Persistent": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Regenerating": {
+        "checkpoints": [
+          8000
+        ]
+      }
+    }
+  },
+  "starfish": {
+    "emoji": "",
+    "regimens": {
+      "Growing": {
+        "checkpoints": [
+          3000
+        ]
+      },
+      "Persistent": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Regenerating": {
+        "checkpoints": [
+          8000
+        ]
+      }
+    }
+  },
+  "goldfish": {
+    "emoji": "",
+    "regimens": {
+      "Growing": {
+        "checkpoints": [
+          3000
+        ]
+      },
+      "Persistent": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Regenerating": {
+        "checkpoints": [
+          8000
+        ]
+      }
+    }
+  },
+  "squid": {
+    "emoji": "",
+    "regimens": {
+      "Growing": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Persistent": {
+        "checkpoints": [
+          5000
+        ]
+      },
+      "Regenerating": {
+        "checkpoints": [
+          8000
+        ]
+      }
+    }
+  }
+}
