@@ -2,7 +2,7 @@
 
 This project provides an interactive, web-based user interface for training and running "Growing" Neural Cellular Automata (NCA) models, inspired by the research paper and Distill article ["Growing Neural Cellular Automata"](https://distill.pub/2020/growing-ca/).
 
-The application is built with a Python backend using Flask and TensorFlow for the core NCA logic, and a vanilla JavaScript frontend for a dynamic user experience. It allows users to define target patterns, train models in real-time, observe their growth, and interact with the resulting automata in a separate "runner" environment.
+The application is built with a Python backend using Flask and TensorFlow for the core NCA logic, and a vanilla JavaScript frontend for a dynamic user experience. It allows users to define target patterns, train models in real-time, observe their growth, and interact with the resulting automata.
 
 <table align="center">
   <thead>
