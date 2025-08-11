@@ -23,7 +23,6 @@ class CAModel(tf.keras.Model):
             Conv2D(self.channel_n, 1, activation=None,
                    kernel_initializer=tf.zeros_initializer),
         ])
-        # Build the model with a dummy call using expected CHANNEL_N
         self(tf.zeros([1, 3, 3, self.channel_n])) 
 
     @tf.function
@@ -39,8 +38,6 @@ class CAModel(tf.keras.Model):
         
         kernel_stacked = tf.stack([identify, kernel_dx_rot, kernel_dy_rot], axis=-1) 
         kernel_reshaped = kernel_stacked[:, :, None, :] 
-        # The input 'x' to perceive will have self.channel_n channels.
-        # So, final_kernel needs to be compatible.
         final_kernel = tf.repeat(kernel_reshaped, self.channel_n, axis=2) 
         
         y = tf.nn.depthwise_conv2d(x, final_kernel, strides=[1, 1, 1, 1], padding='SAME')
@@ -50,33 +47,30 @@ class CAModel(tf.keras.Model):
     def call(self, x, fire_rate=None, angle=0.0, step_size=1.0,
              enable_entropy=None, entropy_strength=None):
         """Forward pass of the CA. Expects x to have self.channel_n channels."""
-        # Input x should be [B, H, W, self.channel_n]
-
         current_enable_entropy = enable_entropy if enable_entropy is not None else self.enable_entropy
         current_entropy_strength = entropy_strength if entropy_strength is not None else self.entropy_strength
 
         if current_enable_entropy and current_entropy_strength > 0:
-            # Add Gaussian noise to the input state
             noise = tf.random.normal(shape=tf.shape(x), stddev=current_entropy_strength)
             x += noise
 
         pre_life_mask = get_living_mask(x)
 
-        y = self.perceive(x, angle) # perceive is designed for x with self.channel_n
-        dx_update = self.dmodel(y) * step_size # dmodel outputs self.channel_n channels
+        y = self.perceive(x, angle)
+        dx_update = self.dmodel(y) * step_size
         
         current_fire_rate = fire_rate if fire_rate is not None else self.fire_rate
         
-        # Robust way to generate update_probabilities of shape [B, H, W, 1]
-        # This uses the shape of the first channel slice of x.
-        # tf.shape(x[..., 0:1]) gives [B, H, W, 1]
         update_probabilities = tf.random.uniform(shape=tf.shape(x[..., 0:1]))
-                                               
-        update_mask_bool = update_probabilities <= current_fire_rate # Shape [B, H, W, 1]
+        update_mask_bool = update_probabilities <= current_fire_rate
         
-        # dx_update is [B,H,W,CHANNEL_N], tf.cast(update_mask_bool,...) is [B,H,W,1]
-        # Broadcasting works here, scaling each of the CHANNEL_N channels by the same mask value.
         x += dx_update * tf.cast(update_mask_bool, tf.float32)
+
+        # --- MODIFICATION START: Add State Clipping ---
+        # This is the crucial step to prevent the state values from exploding to infinity.
+        # It ensures that after every update, the cell states remain in a stable range.
+        x = tf.clip_by_value(x, -10.0, 10.0)
+        # --- MODIFICATION END ---
 
         post_life_mask = get_living_mask(x)
         life_mask_combined = pre_life_mask & post_life_mask 
