@@ -117,7 +117,7 @@ A standalone, JavaScript-only showcase of the trained models is available for in
 ├── templates/
 │   └── index.html              # HTML for the main web app.
 │
-├── demo/                       # Standalone, static showcase application.
+├── docs/                       # Standalone, static showcase application.
 │   ├── index.html              # The HTML page for the demo.
 │   ├── ca.js                   # Core WebGL and shader logic for the demo.
 │   ├── demo.js                 # UI and application logic for the demo.
