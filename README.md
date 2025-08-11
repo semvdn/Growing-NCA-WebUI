@@ -4,8 +4,76 @@ This project provides an interactive, web-based user interface for training and 
 
 The application is built with a Python backend using Flask and TensorFlow for the core NCA logic, and a vanilla JavaScript frontend for a dynamic user experience. It allows users to define target patterns, train models in real-time, observe their growth, and interact with the resulting automata in a separate "runner" environment.
 
-
-
+<table align="center">
+  <thead>
+    <tr>
+      <th align="center" width="150px">Model</th>
+      <th align="center">Growing</th>
+      <th align="center">Persistent</th>
+      <th align="center">Regenerating</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- Row for the Plant Model -->
+    <tr>
+      <td align="center"><b>Plant</b></td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/plant_growing.gif" width="220px" alt="Animation of the Plant 'Growing' model"/>
+        </a>
+      </td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/plant_persistent.gif" width="220px" alt="Animation of the Plant 'Persistent' model"/>
+        </a>
+      </td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/plant_regen.gif" width="220px" alt="Animation of the Plant 'Regenerating' model"/>
+        </a>
+      </td>
+    </tr>
+    <!-- Row for the Goldfish Model -->
+    <tr>
+      <td align="center"><b>Goldfish</b></td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/goldfish_growing.gif" width="220px" alt="Animation of the Goldfish 'Growing' model"/>
+        </a>
+      </td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/goldfish_persistent.gif" width="220px" alt="Animation of the Goldfish 'Persistent' model"/>
+        </a>
+      </td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/goldfish_regen.gif" width="220px" alt="Animation of the Goldfish 'Regenerating' model"/>
+        </a>
+      </td>
+    </tr>
+    <!-- Row for the Snail Model -->
+    <tr>
+      <td align="center"><b>Snail</b></td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/demo/">
+          <img src="./media/snail_growing.gif" width="220px" alt="Animation of the Snail 'Growing' model"/>
+        </a>
+      </td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/snail_persistent.gif" width="220px" alt="Animation of the Snail 'Persistent' model"/>
+        </a>
+      </td>
+      <td align="center">
+        <a href="https://semvdn.github.io/Growing-NCA-WebUI/">
+          <img src="./media/snail_regen.gif" width="220px" alt="Animation of the Snail 'Regenerating' model"/>
+        </a>
+      </td>
+    </tr>
+    <!-- Add more rows here for other models -->
+  </tbody>
+</table>
 ## Live Demo
 
 A standalone, JavaScript-only showcase of the trained models is available for interaction. This demo runs entirely in the browser using WebGL and can be hosted on static sites like GitHub Pages.
