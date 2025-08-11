@@ -221,3 +221,11 @@ The application is split into two main tabs: **Training** and **Run NCA**.
     -   **Brush Size**: Adjust the size of your interaction tool.
     -   **Draw Color**: When in "Draw" mode, select a color to paint new cells onto the canvas.
     -   **Entropy Dynamics**: Check "Enable Entropy" to add random noise to the NCA's state at each step and use the **Strength** slider to control the amount.
+
+## Acknowledgements and Licensing
+
+The core concepts and several key code components for the Neural Cellular Automata model in this project are based on the original ["Growing Neural Cellular Automata"](https://distill.pub/2020/growing-ca/) research and the associated [Colab Notebook](https://colab.research.google.com/github/google-research/self-organising-systems/blob/master/notebooks/growing_ca.ipynb) by Google Research.
+
+The original work is licensed under the **Apache License 2.0**. In compliance with this license, a copy of the original notice is included in the `NOTICE` file in this repository. Significant modifications have been made to refactor the code into a full-stack web application, but the foundational NCA logic is derived from that work.
+
+The new code developed for this web application is licensed under the **MIT License**, as detailed in the `LICENSE` file.
