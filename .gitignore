@@ -1,5 +1,5 @@
 /.venv
 /models
 /__pycache__
-/demo/h5_models
+/docs/h5_models
 /uploads
