@@ -74,6 +74,7 @@ The application is built with a Python backend using Flask and TensorFlow for th
     <!-- Add more rows here for other models -->
   </tbody>
 </table>
+
 ## Live Demo
 
 A standalone, JavaScript-only showcase of the trained models is available for interaction. This demo runs entirely in the browser using WebGL and can be hosted on static sites like GitHub Pages.
